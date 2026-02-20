@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Admin - Punto de Venta</title>
+    <link rel="stylesheet" href="../styles/global.css">
+    <link rel="stylesheet" href="../styles/dashboard.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-icon">
+                    <img src="../assets/logo.png" alt="Naturalezam" class="sidebar-logo">
+                </div>
+                <h2>Admin Panel</h2>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-section="overview">
+                    <span class="nav-icon">📊</span>
+                    <span>Resumen</span>
+                </a>
+                <a href="#" class="nav-item" data-section="stores">
+                    <span class="nav-icon">🏪</span>
+                    <span>Tiendas</span>
+                </a>
+                <a href="#" class="nav-item" data-section="employees">
+                    <span class="nav-icon">👥</span>
+                    <span>Empleados</span>
+                </a>
+                <a href="#" class="nav-item" data-section="products">
+                    <span class="nav-icon">📦</span>
+                    <span>Productos</span>
+                </a>
+                <a href="#" class="nav-item" data-section="inventory">
+                    <span class="nav-icon">📋</span>
+                    <span>Inventario</span>
+                </a>
+                <a href="#" class="nav-item" data-section="sales">
+                    <span class="nav-icon">💰</span>
+                    <span>Ventas</span>
+                </a>
+                <a href="#" class="nav-item" data-section="caja">
+                    <span class="nav-icon">🏧</span>
+                    <span>Corte de Caja</span>
+                </a>
+                <a href="#" class="nav-item" data-section="reports">
+                    <span class="nav-icon">📈</span>
+                    <span>Reportes</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button class="btn btn-secondary w-100" id="logoutBtn">
+                    <span>🚪</span>
+                    <span>Cerrar Sesión</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div>
+                    <h1 id="pageTitle">Resumen General</h1>
+                    <p class="text-muted" id="pageSubtitle">Vista general del sistema</p>
+                </div>
+                <div class="user-info">
+                    <div class="user-avatar">👤</div>
+                    <div>
+                        <div class="user-name" id="userName">Admin</div>
+                        <div class="user-role">Administrador</div>
+                    </div>
+                </div>
+            </header>
+
+            <div class="content-area">
+                <!-- Overview Section -->
+                <div id="section-overview" class="content-section active">
+
+                    <!-- Global stats row -->
+                    <div class="stats-grid" style="margin-bottom:16px;">
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background:#e8f5e9;">🏪</div>
+                            <div class="stat-content">
+                                <div class="stat-label">Total Tiendas</div>
+                                <div class="stat-value" id="totalStores">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background:#e3f2fd;">👥</div>
+                            <div class="stat-content">
+                                <div class="stat-label">Empleados Activos</div>
+                                <div class="stat-value" id="totalEmployees">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background:#fff3e0;">📦</div>
+                            <div class="stat-content">
+                                <div class="stat-label">Productos</div>
+                                <div class="stat-value" id="totalProducts">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background:#f3e5f5;">💰</div>
+                            <div class="stat-content">
+                                <div class="stat-label">Ventas Hoy</div>
+                                <div class="stat-value" id="todaySales">$0</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stock alerts strip -->
+                    <div id="stockAlertsBanner" style="margin-bottom:14px;"></div>
+
+                    <!-- Per-store accordion -->
+                    <div id="storeAccordion">
+                        <p class="text-muted" style="padding:20px 0 0 4px;">Cargando resumen de tiendas...</p>
+                    </div>
+
+                </div>
+
+                <!-- Stores Section -->
+                <div id="section-stores" class="content-section">
+                    <div class="section-header">
+                        <h2>Gestión de Tiendas</h2>
+                        <button class="btn btn-primary" id="addStoreBtn">
+                            <span>+</span>
+                            <span>Agregar Tienda</span>
+                        </button>
+                    </div>
+
+                    <div class="card mt-2">
+                        <div class="card-body">
+                            <table class="table" id="storesTable">
+                                <thead>
+                                    <tr>
+                                        <th>Nombre</th>
+                                        <th>Dirección</th>
+                                        <th>Tipo</th>
+                                        <th>Estado</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="storesTableBody">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted">Cargando...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Employees Section -->
+                <div id="section-employees" class="content-section">
+                    <div class="section-header">
+                        <h2>Gestión de Empleados</h2>
+                        <button class="btn btn-primary" id="addEmployeeBtn">
+                            <span>+</span>
+                            <span>Agregar Empleado</span>
+                        </button>
+                    </div>
+
+                    <div class="card mt-2">
+                        <div class="card-body">
+                            <table class="table" id="employeesTable">
+                                <thead>
+                                    <tr>
+                                        <th>Usuario</th>
+                                        <th>Nombre Completo</th>
+                                        <th>Rol</th>
+                                        <th>Estado</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="employeesTableBody">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted">Cargando...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Products Section -->
+                <div id="section-products" class="content-section">
+                    <div class="section-header">
+                        <h2>Gestión de Productos</h2>
+                        <button class="btn btn-primary" id="addProductBtn">
+                            <span>+</span>
+                            <span>Agregar Producto</span>
+                        </button>
+                    </div>
+
+                    <div class="card mt-2">
+                        <div class="card-body">
+                            <div class="table-controls">
+                                <input type="text" class="form-control" id="productSearch"
+                                    placeholder="Buscar por nombre o código de barras...">
+                            </div>
+                            <table class="table" id="productsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Código</th>
+                                        <th>Nombre</th>
+                                        <th>Marca</th>
+                                        <th>Categoría</th>
+                                        <th style="min-width: 140px;">
+                                            <div class="d-flex align-items-center justify-content-between">
+                                                <select id="productPriceFilter"
+                                                    class="form-control form-control-sm border-0 font-weight-bold bg-light"
+                                                    style="font-size: 0.85rem; cursor: pointer; padding-left: 0;">
+                                                    <option value="retail">Precio Menudeo</option>
+                                                    <option value="wholesale">Precio Mayoreo</option>
+                                                    <option value="distributor">Precio Distribuidor</option>
+                                                    <option value="buy">Precio Compra</option>
+                                                </select>
+                                            </div>
+                                        </th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="productsTableBody">
+                                    <tr>
+                                        <td colspan="6" class="text-center text-muted">Cargando...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inventory Section -->
+                <div id="section-inventory" class="content-section">
+                    <div class="section-header">
+                        <h2>Control de Inventario</h2>
+                        <button class="btn btn-primary" id="transferBtn">
+                            <span>🔄</span>
+                            <span>Nueva Transferencia</span>
+                        </button>
+                    </div>
+
+                    <div class="card mt-2">
+                        <div class="card-body">
+                            <div class="form-group mb-3">
+                                <label class="form-label">Selecciona una tienda</label>
+                                <select class="form-control" id="inventoryStoreSelect">
+                                    <option value="">Cargando...</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group mb-4">
+                                <input type="text" class="form-control" id="inventorySearchInput"
+                                    placeholder="🔍 Buscar por nombre, marca o código..."
+                                    style="padding: 10px; font-size: 1rem; border-radius: 8px;">
+                            </div>
+                            <table class="table" id="inventoryTable">
+                                <thead>
+                                    <tr>
+                                        <th>Producto</th>
+                                        <th>Cantidad</th>
+                                        <th>Stock Mínimo</th>
+                                        <th>Estado</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="inventoryTableBody">
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted">Selecciona una tienda</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sección de Punto de Venta (POS) -->
+                <div id="section-sales" class="content-section" style="height: calc(100vh - 100px); overflow: hidden;">
+                    <div class="section-header mb-3">
+                        <div class="d-flex align-items-center gap-3">
+                            <h2 class="m-0">Punto de Venta</h2>
+                            <div class="text-secondary mx-2">|</div>
+                            <h3 class="m-0 text-primary" id="posStoreTitle">Cargando tienda...</h3>
+                        </div>
+                        <div>
+                            <span class="badge badge-info" id="posDateDisplay"
+                                style="font-size: 1rem; padding: 8px 15px;"></span>
+                        </div>
+                    </div>
+
+                    <div class="pos-layout">
+                        <!-- Columna Izquierda: Grid de Productos (Estilo Desktop) -->
+                        <div class="pos-grid-container">
+                            <!-- Barra de Herramientas Superior -->
+                            <div class="pos-search-header">
+                                <div class="position-relative w-100">
+                                    <input type="text" id="posSearchProduct" class="form-control"
+                                        placeholder="🔍 Buscar artículo (Nombre o Código F1)..." autofocus
+                                        style="border-radius: 0; border: 1px solid #ccc; font-size: 0.95rem;">
+                                    <div id="posSearchResults" class="list-group position-absolute w-100 shadow"
+                                        style="z-index: 1000; display: none; top: 100%; max-height: 300px; overflow-y: auto;">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tabla de Productos -->
+                            <div class="pos-table-wrapper">
+                                <table class="pos-table" id="posCartTable">
+                                    <thead class="sticky-top">
+                                        <tr>
+                                            <th style="width: 15%">CÓDIGO</th>
+                                            <th style="width: 10%" class="text-center">CANT.</th>
+                                            <th style="width: 40%">DESCRIPCIÓN</th>
+                                            <th style="width: 15%" class="text-right">P. UNIT</th>
+                                            <th style="width: 15%" class="text-right">IMPORTE</th>
+                                            <th style="width: 5%"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="posCartBody">
+                                        <!-- Items del carrito -->
+                                    </tbody>
+                                </table>
+
+                                <div id="posEmptyState"
+                                    class="text-center p-5 text-muted h-100 d-flex flex-column justify-content-center align-items-center"
+                                    style="background: #fdfdfd;">
+                                    <div style="font-size: 3rem; color: #ddd;">🛒</div>
+                                    <p class="mt-2 text-sm text-secondary">Listo para ventas</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Columna Derecha: Totales y Cobro -->
+                        <!-- Columna Derecha: Panel de Cobro -->
+                        <div class="card h-100 border-0 shadow-sm"
+                            style="display:flex; flex-direction:column; background:white; border-radius:12px; overflow:hidden;">
+
+                            <!-- HEADER: Total -->
+                            <div
+                                style="background: linear-gradient(135deg, #2d6a2d, #4a9e4a); color:white; padding: 10px 12px 8px; text-align:center;">
+                                <div
+                                    style="font-size:0.62rem; font-weight:700; letter-spacing:2px; opacity:0.8; text-transform:uppercase; margin-bottom:2px;">
+                                    Total a Pagar</div>
+                                <div id="posTotal"
+                                    style="font-size:2.2rem; font-weight:800; line-height:1; letter-spacing:-1px;">$0.00
+                                </div>
+                                <div
+                                    style="display:flex; justify-content:center; gap:12px; margin-top:4px; font-size:0.75rem; opacity:0.85;">
+                                    <span>Subtotal: <strong id="posSubtotal">$0.00</strong></span>
+                                    <span id="posDiscountRow" style="display:none;">Desc: <strong id="posDiscount"
+                                            style="color:#a8f0a8;">-$0.00</strong></span>
+                                </div>
+                            </div>
+
+                            <!-- BODY -->
+                            <div style="flex:1; overflow:hidden; padding:8px 10px 0;">
+
+                                <!-- Tipo de Precio -->
+                                <div style="margin-bottom:7px;">
+                                    <div
+                                        style="font-size:0.6rem; font-weight:700; color:#999; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:4px;">
+                                        Tipo de Precio</div>
+                                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:5px;">
+                                        <button id="priceMode_retail" onclick="setPriceMode('retail')"
+                                            style="padding:6px 2px; border:1.5px solid #2d6a2d; border-radius:6px; background:#2d6a2d; color:white; font-weight:600; font-size:0.73rem; cursor:pointer;">🛒
+                                            Menudeo</button>
+                                        <button id="priceMode_wholesale" onclick="setPriceMode('wholesale')"
+                                            style="padding:6px 2px; border:1.5px solid #2d6a2d; border-radius:6px; background:white; color:#444; font-weight:600; font-size:0.73rem; cursor:pointer;">📦
+                                            Mayoreo</button>
+                                        <button id="priceMode_distributor" onclick="setPriceMode('distributor')"
+                                            style="padding:6px 2px; border:1.5px solid #2d6a2d; border-radius:6px; background:white; color:#444; font-weight:600; font-size:0.73rem; cursor:pointer;">🏭
+                                            Dist.</button>
+                                    </div>
+                                </div>
+
+                                <!-- Método de Pago -->
+                                <div style="margin-bottom:7px;">
+                                    <div
+                                        style="font-size:0.6rem; font-weight:700; color:#999; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:4px;">
+                                        Método de Pago</div>
+                                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px;">
+                                        <label id="lblCash" onclick="selectPayment('efectivo')"
+                                            style="display:flex; align-items:center; justify-content:center; gap:5px; padding:7px; border:1.5px solid #2d6a2d; border-radius:6px; cursor:pointer; font-weight:600; font-size:0.8rem; background:#f0faf0; color:#2d6a2d;">
+                                            <input type="radio" name="paymentMethod" id="payCash" value="efectivo"
+                                                checked style="display:none;">
+                                            💵 Efectivo
+                                        </label>
+                                        <label id="lblCard" onclick="selectPayment('tarjeta')"
+                                            style="display:flex; align-items:center; justify-content:center; gap:5px; padding:7px; border:1.5px solid #ccc; border-radius:6px; cursor:pointer; font-weight:600; font-size:0.8rem; color:#666;">
+                                            <input type="radio" name="paymentMethod" id="payCard" value="tarjeta"
+                                                style="display:none;">
+                                            💳 Tarjeta
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <!-- Descuento -->
+                                <div style="margin-bottom:7px;">
+                                    <div
+                                        style="font-size:0.6rem; font-weight:700; color:#999; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:4px;">
+                                        Descuento</div>
+                                    <div style="display:flex; gap:5px; align-items:center;">
+                                        <div
+                                            style="flex:1; display:flex; align-items:center; border:1.5px solid #ddd; border-radius:6px; background:white; overflow:hidden;">
+                                            <input type="number" id="posDiscountInput" min="0" max="100" placeholder="0"
+                                                style="flex:1; border:none; outline:none; padding:6px 8px; font-size:0.9rem; font-weight:700; color:#333; width:50px;">
+                                            <select id="posDiscountType"
+                                                style="border:none; border-left:1.5px solid #eee; background:#f7f7f7; padding:6px 4px; font-size:0.8rem; font-weight:600; color:#555;">
+                                                <option value="percent">%</option>
+                                                <option value="fixed">$</option>
+                                            </select>
+                                        </div>
+                                        <button onclick="applyDiscount()"
+                                            style="padding:6px 10px; background:#f0a500; color:white; border:none; border-radius:6px; font-weight:700; font-size:0.8rem; cursor:pointer; white-space:nowrap;">Aplicar</button>
+                                        <button onclick="clearDiscount()" title="Quitar descuento"
+                                            style="padding:6px 8px; background:#fee; color:#c00; border:1.5px solid #fcc; border-radius:6px; font-weight:700; font-size:0.8rem; cursor:pointer;">✕</button>
+                                    </div>
+                                </div>
+
+                                <!-- Dinero Recibido -->
+                                <div style="margin-bottom:7px;">
+                                    <div
+                                        style="font-size:0.6rem; font-weight:700; color:#999; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:4px;">
+                                        Dinero Recibido</div>
+                                    <div
+                                        style="display:flex; align-items:center; border:1.5px solid #ddd; border-radius:6px; background:white; overflow:hidden;">
+                                        <span style="padding:0 8px; color:#999; font-size:0.9rem;">$</span>
+                                        <input type="number" id="posAmountPaid" placeholder="0.00" min="0" step="0.50"
+                                            style="flex:1; border:none; outline:none; padding:7px 8px 7px 0; font-size:1.3rem; font-weight:700; color:#222; background:transparent;">
+                                    </div>
+                                </div>
+
+                                <!-- Cambio -->
+                                <div
+                                    style="background:#f0faf0; border:1.5px solid #c8e6c8; border-radius:6px; padding:7px 12px; display:flex; justify-content:space-between; align-items:center;">
+                                    <span
+                                        style="font-size:0.75rem; font-weight:700; color:#555; text-transform:uppercase; letter-spacing:1px;">Su
+                                        Cambio</span>
+                                    <span id="posChange"
+                                        style="font-size:1.3rem; font-weight:800; color:#2d6a2d;">$0.00</span>
+                                </div>
+
+                            </div>
+
+                            <!-- FOOTER: Botones -->
+                            <div
+                                style="padding:8px 10px; background:white; border-top:1px solid #f0f0f0; display:flex; flex-direction:column; gap:6px;">
+                                <button id="btnProcessSale" disabled style="padding:11px; background:#2d6a2d; color:white; border:none; border-radius:8px;
+                                           font-size:0.95rem; font-weight:800; letter-spacing:0.5px; cursor:pointer;
+                                           opacity:0.45; transition:all 0.15s; width:100%;">
+                                    ✅ COBRAR (F2)
+                                </button>
+                                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                                    <button id="btnTicketToggle" onclick="toggleTicket()"
+                                        style="padding:8px; background:#f8f9fa; color:#666; border:1.5px solid #ddd; border-radius:6px; font-size:0.8rem; font-weight:700; cursor:pointer; transition:all 0.2s;">
+                                        🖨️ Imprimir Ticket
+                                    </button>
+                                    <button id="btnCancelSale"
+                                        style="padding:8px; background:#fff0f0; color:#c00; border:1.5px solid #fcc; border-radius:6px; font-weight:700; font-size:0.8rem; cursor:pointer;">
+                                        ✕ Cancelar
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Reports Section -->
+                <div id="section-reports" class="content-section">
+                    <div class="section-header">
+                        <h2>Reportes y Análisis</h2>
+                    </div>
+
+                    <div class="reports-grid">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Ventas por Tienda</h3>
+                            </div>
+                            <div class="card-body">
+                                <canvas id="salesByStoreChart"></canvas>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Productos Más Vendidos</h3>
+                            </div>
+                            <div class="card-body">
+                                <div id="topProducts">Cargando...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Corte de Caja Section -->
+                <div id="section-caja" class="content-section">
+
+                    <div
+                        style="background:white; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:20px 24px; margin-bottom:16px; display:flex; align-items:center; gap:16px;">
+                        <span style="font-size:1.4rem;">🏪</span>
+                        <div style="flex:1;">
+                            <label
+                                style="font-size:0.72rem; font-weight:700; color:#9ca3af; text-transform:uppercase; letter-spacing:1px;">Selecciona
+                                Tienda</label>
+                            <select id="cajaStoreSelect" onchange="onCajaStoreChange()"
+                                style="display:block; width:100%; margin-top:4px; padding:8px 12px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:0.9rem; font-weight:600; color:#1a1a1a; background:white; cursor:pointer;">
+                                <option value="">-- Elige una tienda --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="cajaPanel" style="display:none;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px;">
+                            <div
+                                style="background:white; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:20px 24px;">
+                                <div
+                                    style="font-size:0.7rem; font-weight:700; color:#9ca3af; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">
+                                    💵 Efectivo en Caja (Esperado)</div>
+                                <input type="number" id="cajaEfectivoTotal" step="0.01" oninput="updateCajaDiff()"
+                                    style="font-size:2rem; font-weight:800; color:#1a1a1a; border:none; border-bottom:2px dashed #ccc; width:100%; background:transparent; outline:none;">
+                                <div style="font-size:0.75rem; color:#6b7280; margin-top:4px;">Calculado (Ventas +
+                                    Fondo). Editable.</div>
+                            </div>
+                            <div
+                                style="background:white; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:20px 24px;">
+                                <div
+                                    style="font-size:0.7rem; font-weight:700; color:#9ca3af; text-transform:uppercase; letter-spacing:1px; margin-bottom:6px;">
+                                    💳 Total Tarjeta</div>
+                                <div id="cajaTarjetaTotal" style="font-size:2rem; font-weight:800; color:#1a1a1a;">$0.00
+                                </div>
+                                <div style="font-size:0.75rem; color:#6b7280; margin-top:6px;">Cobros procesados por
+                                    terminal</div>
+                                <button onclick="vaciarTarjeta()" id="btnVaciarTarjeta"
+                                    style="margin-top:10px; width:100%; padding:8px; background:#1d4ed8; color:white; border:none; border-radius:8px; font-weight:700; font-size:0.82rem; cursor:pointer;">✅
+                                    Marcar Tarjeta como Cobrada</button>
+                            </div>
+                        </div>
+
+                        <div id="cajaLastCut"
+                            style="background:#f0fdf4; border:1.5px solid #86efac; border-radius:10px; padding:12px 16px; margin-bottom:16px; font-size:0.82rem; color:#166534;">
+                        </div>
+
+                        <div
+                            style="background:white; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:20px 24px;">
+                            <div style="font-size:0.9rem; font-weight:700; color:#374151; margin-bottom:14px;">📋
+                                Registrar Corte de Caja</div>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+                                <div>
+                                    <label
+                                        style="font-size:0.72rem; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.8px; display:block; margin-bottom:6px;">Dinero
+                                        a retirar ($)</label>
+                                    <input type="number" id="cajaClosingAmount" min="0" step="0.01" placeholder="0.00"
+                                        oninput="updateCajaDiff('withdraw')"
+                                        style="width:100%; padding:10px 14px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:1rem; font-weight:700; box-sizing:border-box;">
+                                </div>
+                                <div>
+                                    <label
+                                        style="font-size:0.72rem; font-weight:700; color:#6b7280; text-transform:uppercase; letter-spacing:.8px; display:block; margin-bottom:6px;">Dinero
+                                        a dejar en caja ($)</label>
+                                    <div style="display:flex; gap:8px;">
+                                        <input type="number" id="cajaLeaveAmount" min="0" step="0.01" placeholder="0.00"
+                                            oninput="updateCajaDiff('leave')"
+                                            style="flex:1; padding:10px 14px; border:1.5px solid #e5e7eb; border-radius:8px; font-size:1rem; font-weight:700; box-sizing:border-box;">
+                                        <button onclick="updateCajaDiff('leave_refresh')"
+                                            title="Sincronizar (Establecer como Esperado)"
+                                            style="padding:0 16px; background:#f3f4f6; color:#374151; border:1.5px solid #e5e7eb; border-radius:8px; cursor:pointer; font-size:1.2rem;">🔄</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:12px; margin-bottom:16px;">
+                                <div
+                                    style="flex:1; background:#f9fafb; border-radius:8px; padding:10px 14px; text-align:center;">
+                                    <div
+                                        style="font-size:0.68rem; color:#9ca3af; font-weight:700; text-transform:uppercase;">
+                                        Esperado en caja</div>
+                                    <div id="cajaExpected"
+                                        style="font-size:1.1rem; font-weight:800; color:#1a1a1a; margin-top:2px;">$0.00
+                                    </div>
+                                </div>
+                                <div
+                                    style="flex:1; background:#f9fafb; border-radius:8px; padding:10px 14px; text-align:center;">
+                                    <div
+                                        style="font-size:0.68rem; color:#9ca3af; font-weight:700; text-transform:uppercase;">
+                                        Diferencia</div>
+                                    <div id="cajaDiff" style="font-size:1.1rem; font-weight:800; margin-top:2px;">$0.00
+                                    </div>
+                                </div>
+                                <div
+                                    style="flex:1; background:#f9fafb; border-radius:8px; padding:10px 14px; text-align:center;">
+                                    <div
+                                        style="font-size:0.68rem; color:#9ca3af; font-weight:700; text-transform:uppercase;">
+                                        A Retirar</div>
+                                    <div id="cajaToRetire"
+                                        style="font-size:1.1rem; font-weight:800; color:#1d4ed8; margin-top:2px;">$0.00
+                                    </div>
+                                </div>
+                            </div>
+                            <button onclick="registrarCorte()" id="btnRegistrarCorte"
+                                style="width:100%; padding:14px; background:linear-gradient(135deg,#2d6a2d,#4a9e4a); color:white; border:none; border-radius:10px; font-size:1rem; font-weight:800; cursor:pointer; letter-spacing:.5px;">🏧
+                                REGISTRAR CORTE DE CAJA</button>
+                        </div>
+
+                        <div
+                            style="background:white; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.08); padding:20px 24px; margin-top:14px;">
+                            <div style="font-size:0.85rem; font-weight:700; color:#374151; margin-bottom:12px;">🕓
+                                Historial de Cortes</div>
+                            <div id="cajaHistory">
+                                <p class="text-muted" style="font-size:0.82rem;">Sin historial disponible.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Corte de Caja Section (injected into content-area via JS loadCorteCaja) -->
+    <!-- The actual section is inserted dynamically below by the admin.js -->
+
+    <!-- Modals will be added here -->
+    <div id="modalContainer"></div>
+
+    <!-- Store Selection Modal -->
+    <div class="modal fade" id="storeSelectionModal" tabindex="-1" aria-hidden="true" data-backdrop="static"
+        data-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">Seleccionar Sucursal de Trabajo</h5>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted">Por favor, indica en qué tienda estás operando para registrar las ventas
+                        correctamente.</p>
+                    <div class="d-grid gap-2" id="storeSelectionList">
+                        <!-- Stores will be loaded here -->
+                        <div class="text-center"><i class="fas fa-spinner fa-spin"></i> Cargando tiendas...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="../config/supabase.js"></script>
+    <script src="../scripts/auth.js"></script>
+    <script src="../scripts/admin.js"></script>
+</body>
+
+</html>

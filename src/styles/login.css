@@ -1,0 +1,423 @@
+.login-container {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.login-left {
+    flex: 1;
+    background: linear-gradient(135deg, var(--primary-dark) 0%, var(--primary) 50%, var(--primary-light) 100%);
+    color: white;
+    padding: var(--spacing-xl);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.login-left::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+    animation: rotate 30s linear infinite;
+}
+
+@keyframes rotate {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.brand-section {
+    text-align: center;
+    z-index: 1;
+    margin-bottom: var(--spacing-xl);
+}
+
+.brand-icon {
+    margin-bottom: var(--spacing-md);
+    animation: float 3s ease-in-out infinite;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.logo-image {
+    width: 280px;
+    height: auto;
+    max-width: 100%;
+    filter: drop-shadow(2px 4px 8px rgba(0, 0, 0, 0.3));
+}
+
+@keyframes float {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+.brand-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: var(--spacing-sm);
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.brand-subtitle {
+    font-size: 1.25rem;
+    opacity: 0.9;
+    font-weight: 300;
+}
+
+.stores-section {
+    z-index: 1;
+    max-width: 420px;
+    width: 100%;
+}
+
+.stores-title {
+    color: white;
+    font-size: var(--font-size-lg);
+    font-weight: 600;
+    margin-bottom: var(--spacing-md);
+    text-align: center;
+}
+
+.stores-list-left {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    max-height: 350px;
+    overflow-y: auto;
+    padding-right: var(--spacing-xs);
+}
+
+/* Custom scrollbar for stores list */
+.stores-list-left::-webkit-scrollbar {
+    width: 6px;
+}
+
+.stores-list-left::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+.stores-list-left::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 3px;
+}
+
+.stores-list-left::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.5);
+}
+
+.store-card-left {
+    padding: var(--spacing-md);
+    background: rgba(255, 255, 255, 0.15);
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-base);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    backdrop-filter: blur(10px);
+}
+
+.store-card-left:hover {
+    background: rgba(255, 255, 255, 0.25);
+    border-color: rgba(255, 255, 255, 0.4);
+    transform: scale(1.02);
+}
+
+.store-card-left.selected {
+    background: rgba(255, 255, 255, 0.3);
+    border-color: white;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.store-card-icon-left {
+    font-size: 1.5rem;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-sm);
+}
+
+.store-card-content-left {
+    flex: 1;
+    min-width: 0;
+}
+
+.store-card-name-left {
+    font-weight: 600;
+    color: white;
+    font-size: var(--font-size-base);
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.store-card-address-left {
+    font-size: var(--font-size-sm);
+    color: rgba(255, 255, 255, 0.8);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.store-card-badge-left {
+    padding: 4px 8px;
+    background: rgba(255, 255, 255, 0.25);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.spinner-small-white {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top: 3px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto;
+}
+
+.text-muted-white {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: var(--font-size-sm);
+}
+
+.login-right {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-xl);
+    background: var(--bg-main);
+}
+
+.login-card {
+    width: 100%;
+    max-width: 450px;
+    background: var(--bg-card);
+    padding: var(--spacing-xl);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+}
+
+.login-title {
+    font-size: var(--font-size-2xl);
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-primary);
+}
+
+.login-description {
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-xl);
+}
+
+.login-footer {
+    margin-top: var(--spacing-lg);
+}
+
+.spinner-small {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top: 2px solid white;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+#loginBtn {
+    position: relative;
+    gap: var(--spacing-sm);
+}
+
+#loginBtn:disabled {
+    cursor: not-allowed;
+}
+
+/* Store Selection Styles */
+.stores-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.store-card {
+    padding: var(--spacing-lg);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-card);
+    cursor: pointer;
+    transition: all var(--transition-base);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+}
+
+.store-card:hover {
+    border-color: var(--primary);
+    background: var(--bg-hover);
+    transform: translateX(5px);
+    box-shadow: var(--shadow-md);
+}
+
+.store-card-icon {
+    font-size: 2rem;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-hover);
+    border-radius: var(--radius-md);
+}
+
+.store-card-icon.bodega {
+    background: #fff3e0;
+}
+
+.store-card-content {
+    flex: 1;
+}
+
+.store-card-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-xs);
+}
+
+.store-card-address {
+    font-size: var(--font-size-sm);
+    color: var(--text-secondary);
+}
+
+.store-card-badge {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    background: var(--primary);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-sm);
+    font-weight: 500;
+}
+
+.store-card-badge.bodega {
+    background: var(--warning);
+}
+
+/* Selected Store Badge */
+.selected-store-badge {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: linear-gradient(135deg, var(--primary-light), var(--primary));
+    color: white;
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--spacing-lg);
+}
+
+.store-icon {
+    font-size: 2rem;
+}
+
+.selected-store-badge>div {
+    flex: 1;
+}
+
+.store-name {
+    font-weight: 600;
+    font-size: var(--font-size-lg);
+}
+
+.store-address {
+    font-size: var(--font-size-sm);
+    opacity: 0.9;
+}
+
+.btn-change-store {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: var(--spacing-xs) var(--spacing-md);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: var(--font-size-sm);
+    transition: all var(--transition-base);
+}
+
+.btn-change-store:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Disabled Message */
+.disabled-message {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--text-secondary);
+}
+
+.disabled-icon {
+    font-size: 4rem;
+    margin-bottom: var(--spacing-md);
+    opacity: 0.3;
+}
+
+.disabled-message h3 {
+    font-size: var(--font-size-xl);
+    color: var(--text-primary);
+    margin-bottom: var(--spacing-sm);
+}
+
+.disabled-message p {
+    font-size: var(--font-size-base);
+    color: var(--text-secondary);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .login-container {
+        flex-direction: column;
+    }
+
+    .login-left {
+        padding: var(--spacing-lg);
+    }
+
+    .brand-title {
+        font-size: 2rem;
+    }
+
+    .features {
+        display: none;
+    }
+}

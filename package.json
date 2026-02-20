@@ -1,0 +1,19 @@
+{
+  "name": "punto-venta-naturista",
+  "version": "1.0.0",
+  "description": "Sistema de Punto de Venta para Tiendas Naturistas",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "keywords": ["pos", "punto-venta", "naturista", "supabase"],
+  "author": "Carlos Bernabb",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0"
+  }
+}
