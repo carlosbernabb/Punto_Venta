@@ -1,0 +1,87 @@
+{
+  "name": "punto-venta-naturista",
+  "version": "9.0.0",
+  "description": "Sistema de Punto de Venta para Tiendas Naturistas",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "check": "node --check main.js && node --check src/scripts/auth.js && node --check src/scripts/login.js && node --check src/scripts/admin.js",
+    "dist": "electron-builder --publish never",
+    "publish:update": "node scripts/publish-update.js",
+    "publish:bootstrap": "node scripts/publish-bootstrap-manifest.js"
+  },
+  "keywords": [
+    "pos",
+    "punto-venta",
+    "naturista",
+    "supabase"
+  ],
+  "author": "Carlos Bernabb",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^22.3.27",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "chart.js": "^4.5.1",
+    "chartjs-plugin-datalabels": "^2.2.0",
+    "electron-updater": "6.8.9",
+    "qrcode": "^1.5.4",
+    "xlsx": "^0.18.5"
+  },
+  "build": {
+    "appId": "com.lacasadelajo.pos",
+    "productName": "La Casa del Ajo",
+    "electronUpdaterCompatibility": ">=2.16",
+    "publish": {
+      "provider": "github",
+      "owner": "carlosbernabb",
+      "repo": "Punto_Venta",
+      "releaseType": "release"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "!src/**/*.backup",
+      "node_modules/**/*",
+      "!node_modules/.cache",
+      "!dist/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "src/assets/app-icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "src/assets/app-icon.ico",
+      "uninstallerIcon": "src/assets/app-icon.ico",
+      "shortcutName": "La Casa del Ajo",
+      "artifactName": "Punto de Venta ${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Punto de Venta Portable ${version}.${ext}"
+    }
+  }
+}

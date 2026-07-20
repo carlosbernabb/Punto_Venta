@@ -1,0 +1,367 @@
+/* ============================================================
+   MODO OSCURO
+   Se activa agregando la clase .dark-mode al <html>
+   (ver snippet en el <head> de cada página y setAppTheme en admin.js).
+
+   Estrategia:
+   1) Redefinir las variables CSS del tema.
+   2) Corregir colores claros fijos de las hojas de estilo.
+   3) Sobrescribir los estilos inline más comunes del HTML generado
+      (admin.js pinta muchos paneles con colores fijos) usando
+      selectores de atributo + !important.
+   ============================================================ */
+
+html.dark-mode {
+  color-scheme: dark;
+
+  --primary: #3f8f22;
+  --primary-light: #4fa42e;
+  --primary-dark: #2e6e18;
+  --accent: #74b84a;
+  --accent-light: #8ecf63;
+
+  --bg-main: #0f172a;
+  --bg-card: #1e293b;
+  --bg-hover: #26334a;
+  --text-primary: #e5eaf1;
+  --text-secondary: #9fb0c3;
+  --text-muted: #708197;
+
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --error: #f87171;
+  --info: #60a5fa;
+
+  --border: #334155;
+  --border-light: #293850;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.55), 0 4px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* ---------- 2) Correcciones de hojas de estilo ---------- */
+
+html.dark-mode body {
+  background: var(--bg-main);
+  color: var(--text-primary);
+}
+
+html.dark-mode .table thead {
+  background: #24334b;
+}
+
+html.dark-mode input.form-control,
+html.dark-mode select.form-control,
+html.dark-mode textarea.form-control,
+html.dark-mode input[type="text"],
+html.dark-mode input[type="number"],
+html.dark-mode input[type="password"],
+html.dark-mode input[type="date"],
+html.dark-mode input[type="search"],
+html.dark-mode select,
+html.dark-mode textarea {
+  background-color: #16202f !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border) !important;
+}
+
+html.dark-mode input::placeholder,
+html.dark-mode textarea::placeholder {
+  color: #64748b !important;
+}
+
+html.dark-mode option {
+  background-color: #16202f;
+  color: var(--text-primary);
+}
+
+html.dark-mode ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+html.dark-mode ::-webkit-scrollbar-track {
+  background: #16202f;
+}
+html.dark-mode ::-webkit-scrollbar-thumb {
+  background: #3b4d66;
+  border-radius: 6px;
+}
+html.dark-mode ::-webkit-scrollbar-thumb:hover {
+  background: #4b5f7d;
+}
+
+html.dark-mode .modal-content,
+html.dark-mode .modal .modal-content {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+html.dark-mode .btn-secondary {
+  background: #26334a !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border) !important;
+}
+
+html.dark-mode .btn-light {
+  background: #26334a !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border) !important;
+}
+
+/* El punteado decorativo del login casi no se ve en oscuro: suavizarlo */
+html.dark-mode .login-right {
+  background-image: radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.03) 1px, transparent 0);
+}
+
+/* ---------- 3) Estilos inline generados por admin.js ---------- */
+/* Superficies blancas / gris muy claro → superficie oscura.
+   OJO: el orden importa — las reglas de tonos pastel van DESPUÉS
+   para ganarle a la genérica de "#fff". */
+
+html.dark-mode [style*="background:white"],
+html.dark-mode [style*="background: white"],
+html.dark-mode [style*="background:#fff"],
+html.dark-mode [style*="background: #fff"],
+html.dark-mode [style*="background:#ffffff"],
+html.dark-mode [style*="background-color:white"],
+html.dark-mode [style*="background-color: white"],
+html.dark-mode [style*="background-color:#fff"] {
+  background-color: var(--bg-card) !important;
+}
+
+html.dark-mode [style*="background:#f8fafc"],
+html.dark-mode [style*="background: #f8fafc"],
+html.dark-mode [style*="background:#f9fafb"],
+html.dark-mode [style*="background:#fcfdfe"],
+html.dark-mode [style*="background:#f8f9fa"],
+html.dark-mode [style*="background:#f1f5f9"],
+html.dark-mode [style*="background: #f1f5f9"],
+html.dark-mode [style*="background:#f0f4ed"],
+html.dark-mode [style*="background:#eef2f7"],
+html.dark-mode [style*="background:#fafafa"],
+html.dark-mode [style*="background:#f8f9fb"],
+html.dark-mode [style*="background:#f0f0f0"],
+html.dark-mode [style*="background:#e2e8f0"],
+html.dark-mode [style*="background: #e2e8f0"] {
+  background-color: #24334b !important;
+}
+
+/* Tonos pastel grandes → su versión oscura (después de las genéricas) */
+html.dark-mode [style*="background:#eff6ff"],
+html.dark-mode [style*="background: #eff6ff"],
+html.dark-mode [style*="background:#e0f2fe"],
+html.dark-mode [style*="background:#dbeafe"] {
+  background-color: #1a2942 !important;
+}
+
+html.dark-mode [style*="background:#f0fdf4"],
+html.dark-mode [style*="background: #f0fdf4"],
+html.dark-mode [style*="background:#dcfce7"],
+html.dark-mode [style*="background:#e8f5e9"] {
+  background-color: #14291c !important;
+}
+
+html.dark-mode [style*="background:#fffbeb"],
+html.dark-mode [style*="background: #fffbeb"],
+html.dark-mode [style*="background:#fef9c3"],
+html.dark-mode [style*="background:#fef3c7"],
+html.dark-mode [style*="background:#fff3e0"],
+html.dark-mode [style*="background:#ffedd5"] {
+  background-color: #33270f !important;
+}
+
+html.dark-mode [style*="background:#fee2e2"],
+html.dark-mode [style*="background: #fee2e2"],
+html.dark-mode [style*="background:#fef2f2"] {
+  background-color: #3a1a1a !important;
+}
+
+/* Textos oscuros fijos → claros */
+html.dark-mode [style*="color:#111827"],
+html.dark-mode [style*="color: #111827"],
+html.dark-mode [style*="color:#0f172a"],
+html.dark-mode [style*="color:#1e293b"],
+html.dark-mode [style*="color:#1f2937"],
+html.dark-mode [style*="color:#222"],
+html.dark-mode [style*="color:#333"],
+html.dark-mode [style*="color:#000"],
+html.dark-mode [style*="color: #000"],
+html.dark-mode [style*="color:black"] {
+  color: #e5eaf1 !important;
+}
+
+html.dark-mode [style*="color:#334155"],
+html.dark-mode [style*="color:#374151"],
+html.dark-mode [style*="color:#475569"],
+html.dark-mode [style*="color: #475569"],
+html.dark-mode [style*="color:#666"] {
+  color: #b6c2d1 !important;
+}
+
+html.dark-mode [style*="color:#64748b"],
+html.dark-mode [style*="color: #64748b"],
+html.dark-mode [style*="color:#6b7280"],
+html.dark-mode [style*="color:#94a3b8"],
+html.dark-mode [style*="color:#555"],
+html.dark-mode [style*="color: #555"],
+html.dark-mode [style*="color:#444"] {
+  color: #8fa1b5 !important;
+}
+
+/* Colores semánticos oscuros → versión brillante legible en oscuro */
+html.dark-mode [style*="color:#166534"],
+html.dark-mode [style*="color: #166534"],
+html.dark-mode [style*="color:#15803d"],
+html.dark-mode [style*="color:#16a34a"],
+html.dark-mode [style*="color: #16a34a"],
+html.dark-mode [style*="color:#2d7a2d"],
+html.dark-mode [style*="color:#2d6a2d"] {
+  color: #4ade80 !important;
+}
+
+html.dark-mode [style*="color:#1d4ed8"],
+html.dark-mode [style*="color: #1d4ed8"],
+html.dark-mode [style*="color:#1e40af"],
+html.dark-mode [style*="color:#2563eb"],
+html.dark-mode [style*="color:#0369a1"] {
+  color: #93c5fd !important;
+}
+
+html.dark-mode [style*="color:#92400e"],
+html.dark-mode [style*="color: #92400e"],
+html.dark-mode [style*="color:#a16207"],
+html.dark-mode [style*="color:#854d0e"],
+html.dark-mode [style*="color:#9a3412"],
+html.dark-mode [style*="color:#d97706"] {
+  color: #fbbf24 !important;
+}
+
+html.dark-mode [style*="color:#991b1b"],
+html.dark-mode [style*="color: #991b1b"],
+html.dark-mode [style*="color:#dc2626"],
+html.dark-mode [style*="color:#d32f2f"] {
+  color: #fca5a5 !important;
+}
+
+/* Bordes claros fijos → borde oscuro */
+html.dark-mode [style*="border:1px solid #e2e8f0"],
+html.dark-mode [style*="border: 1px solid #e2e8f0"],
+html.dark-mode [style*="border:1px solid #e5e7eb"],
+html.dark-mode [style*="border: 1px solid #e5e7eb"],
+html.dark-mode [style*="border:1px solid #eef2f7"],
+html.dark-mode [style*="border:1.5px solid #e2e8f0"],
+html.dark-mode [style*="border:1px solid #bfdbfe"],
+html.dark-mode [style*="border:1px solid #bbf7d0"],
+html.dark-mode [style*="border:1px solid #fde68a"],
+html.dark-mode [style*="border:1px solid #ddd"],
+html.dark-mode [style*="border:1px solid #eee"] {
+  border-color: #334155 !important;
+}
+
+html.dark-mode [style*="border-bottom:1px solid #eef2f7"],
+html.dark-mode [style*="border-bottom:1px solid #f1f5f9"],
+html.dark-mode [style*="border-bottom:1px solid #e2e8f0"],
+html.dark-mode [style*="border-bottom: 1px solid #e2e8f0"] {
+  border-bottom-color: #293850 !important;
+}
+
+/* Badges de estado (clases de global.css con colores fijos) */
+html.dark-mode .badge-success {
+  background: #14291c !important;
+  color: #4ade80 !important;
+}
+html.dark-mode .badge-warning {
+  background: #33270f !important;
+  color: #fbbf24 !important;
+}
+html.dark-mode .badge-error {
+  background: #3a1a1a !important;
+  color: #fca5a5 !important;
+}
+html.dark-mode .badge-info {
+  background: #1a2942 !important;
+  color: #93c5fd !important;
+}
+
+/* Iconos de stats y chips con pasteles no cubiertos arriba */
+html.dark-mode [style*="background:#e3f2fd"],
+html.dark-mode [style*="background: #e3f2fd"] {
+  background-color: #1a2942 !important;
+}
+html.dark-mode [style*="background:#f3e5f5"],
+html.dark-mode [style*="background: #f3e5f5"] {
+  background-color: #2a1f33 !important;
+}
+
+/* Textos semánticos oscuros restantes sobre chips que ya se oscurecieron */
+html.dark-mode [style*="color:#b91c1c"],
+html.dark-mode [style*="color: #b91c1c"],
+html.dark-mode [style*="color:#b71c1c"],
+html.dark-mode [style*="color:#c62828"] {
+  color: #fca5a5 !important;
+}
+html.dark-mode [style*="color:#78350f"],
+html.dark-mode [style*="color: #78350f"],
+html.dark-mode [style*="color:#7c2d12"],
+html.dark-mode [style*="color:#c2410c"],
+html.dark-mode [style*="color:#c44f00"] {
+  color: #fbbf24 !important;
+}
+html.dark-mode [style*="color:#1350a0"],
+html.dark-mode [style*="color:#1565c0"] {
+  color: #93c5fd !important;
+}
+
+/* Chips grises pequeños */
+html.dark-mode [style*="background:#f3f4f6"],
+html.dark-mode [style*="background: #f3f4f6"],
+html.dark-mode [style*="background:#e5e7eb"] {
+  background-color: #26334a !important;
+}
+
+/* Iconos KPI de Reportes (clases de dashboard.css) */
+html.dark-mode .kpi-card.kpi-green .kpi-icon-wrap   { background: #14291c !important; }
+html.dark-mode .kpi-card.kpi-emerald .kpi-icon-wrap { background: #123529 !important; }
+html.dark-mode .kpi-card.kpi-blue .kpi-icon-wrap    { background: #1a2942 !important; }
+html.dark-mode .kpi-card.kpi-purple .kpi-icon-wrap  { background: #251d3d !important; }
+
+html.dark-mode [style*="background:#d1fae5"],
+html.dark-mode [style*="background:#a7f3d0"] {
+  background-color: #123529 !important;
+}
+html.dark-mode [style*="background:#ede9fe"],
+html.dark-mode [style*="background:#f3e8ff"] {
+  background-color: #251d3d !important;
+}
+
+/* Estilos aplicados por JS (el.style.x = ...) se serializan como rgb(...) */
+html.dark-mode [style*="color: rgb(85, 85, 85)"],
+html.dark-mode [style*="color: rgb(102, 102, 102)"] {
+  color: #8fa1b5 !important;
+}
+html.dark-mode [style*="background: rgb(240, 250, 240)"],
+html.dark-mode [style*="background:#f0faf0"],
+html.dark-mode [style*="background: #f0faf0"] {
+  background-color: #14291c !important;
+}
+html.dark-mode [style*="background: rgb(248, 249, 250)"] {
+  background-color: #24334b !important;
+}
+
+/* Botones rojos suaves (cancelar / quitar) */
+html.dark-mode [style*="background:#fee;"],
+html.dark-mode [style*="background: #fee;"],
+html.dark-mode [style*="background:#fff0f0"] {
+  background-color: #3a1a1a !important;
+}
+html.dark-mode [style*="color:#c00"],
+html.dark-mode [style*="color: #c00"] {
+  color: #fca5a5 !important;
+}
+html.dark-mode [style*="border:1.5px solid #fcc"],
+html.dark-mode [style*="border: 1.5px solid #fcc"] {
+  border-color: #7f1d1d !important;
+}
+
+/* Las cabeceras con gradiente de color (verde, azul, etc.) se quedan igual:
+   ya tienen texto blanco y funcionan bien en oscuro. */

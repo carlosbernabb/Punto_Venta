@@ -1,0 +1,33 @@
+name: Publicar aplicacion de escritorio
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Obtener codigo
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Verificar codigo
+        run: npm run check
+
+      - name: Crear y publicar instaladores
+        run: npx electron-builder --publish always
+        env:
+          GH_TOKEN: ${{ github.token }}

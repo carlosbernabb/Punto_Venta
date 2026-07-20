@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+*.log
+.DS_Store
+backups/
+migration_reports/
+*.xlsx
+*.docx
+*.backup
+src/**/*.backup
+build_log.txt
+dist_output.txt
+error.txt
+output.log
