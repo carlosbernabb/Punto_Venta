@@ -13,21 +13,10 @@ if (!SUPABASE_KEY) {
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 const version = packageJson.version;
-const installerName = `Punto de Venta ${version}.exe`;
-const releaseUrl = `https://github.com/carlosbernabb/Punto_Venta/releases/download/v${version}/${encodeURIComponent(installerName)}`;
 const sourcePath = path.join(__dirname, '..', 'dist', 'latest.yml');
 
 if (!fs.existsSync(sourcePath)) {
   throw new Error('No se encontro dist/latest.yml. Ejecuta npm run dist antes de publicar.');
-}
-
-const sourceManifest = fs.readFileSync(sourcePath, 'utf8');
-const bootstrapManifest = sourceManifest
-  .replace(/^  - url: .*$/m, `  - url: ${releaseUrl}`)
-  .replace(/^path: .*$/m, `path: ${releaseUrl}`);
-
-if (!bootstrapManifest.includes(`version: ${version}`) || !bootstrapManifest.includes(releaseUrl)) {
-  throw new Error('No se pudo preparar el manifiesto puente de actualizacion.');
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
@@ -35,6 +24,26 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 async function publish() {
+  const releaseBaseUrl = `https://github.com/carlosbernabb/Punto_Venta/releases/download/v${version}/`;
+  const releaseManifestUrl = `${releaseBaseUrl}latest.yml`;
+  const response = await fetch(releaseManifestUrl);
+
+  if (!response.ok) {
+    throw new Error(`No se encontro el manifiesto del Release v${version}.`);
+  }
+
+  const releaseManifest = await response.text();
+  const artifactMatch = releaseManifest.match(/^  - url: (.+)$/m);
+
+  if (!releaseManifest.includes(`version: ${version}`) || !artifactMatch) {
+    throw new Error('El manifiesto del Release no tiene un instalador valido.');
+  }
+
+  const installerUrl = new URL(artifactMatch[1].trim(), releaseBaseUrl).toString();
+  const bootstrapManifest = releaseManifest
+    .replace(/^  - url: .*$/m, `  - url: ${installerUrl}`)
+    .replace(/^path: .*$/m, `path: ${installerUrl}`);
+
   const { error } = await supabase.storage.from(BUCKET).upload(
     REMOTE_PATH,
     Buffer.from(bootstrapManifest, 'utf8'),
