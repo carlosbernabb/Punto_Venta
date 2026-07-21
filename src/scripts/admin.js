@@ -8068,7 +8068,15 @@ function toggleTicket() {
 }
 
 // --- Print Ticket ---
-function printTicket(saleData = null, autoPrint = false, allowManualPrint = !autoPrint) {
+function clearTicketPreviewAutoClose(modal) {
+  if (!modal) return;
+  if (modal._autoCloseTimer) clearTimeout(modal._autoCloseTimer);
+  if (modal._enterCloseHandler) document.removeEventListener('keydown', modal._enterCloseHandler, true);
+  modal._autoCloseTimer = null;
+  modal._enterCloseHandler = null;
+}
+
+function printTicket(saleData = null, autoPrint = false, allowManualPrint = !autoPrint, autoClosePreview = false) {
   // Resolve all data from saleData (post-sale reprint) or from current POS state
   const _tcfg     = resolveTicketConfig();
   const _cart     = saleData ? saleData.items : currentCart;
@@ -8277,10 +8285,12 @@ function printTicket(saleData = null, autoPrint = false, allowManualPrint = !aut
   };
   previewFrame.style.height = '1px';
   previewFrame.srcdoc = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>${ticketStyles}</style></head><body>${ticketBody}</body></html>`;
+  clearTicketPreviewAutoClose(previewModal);
   previewModal.style.display = 'flex';
   previewModal.style.pointerEvents = 'auto';
 
   function closeModal() {
+    clearTicketPreviewAutoClose(previewModal);
     previewModal.style.display = 'none';
     previewModal.style.pointerEvents = 'none';
     window.electronAPI?.refocusWindow?.();
@@ -8293,6 +8303,17 @@ function printTicket(saleData = null, autoPrint = false, allowManualPrint = !aut
   document.getElementById('_ticketPrintBtn').onclick = () => {
     triggerPrint();
   };
+
+  if (autoClosePreview) {
+    const closeWithEnter = (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      closeModal();
+    };
+    previewModal._enterCloseHandler = closeWithEnter;
+    document.addEventListener('keydown', closeWithEnter, true);
+    previewModal._autoCloseTimer = setTimeout(closeModal, 5000);
+  }
 
   // Auto-print if toggle was ON
   if (autoPrint) triggerPrint();
@@ -8709,7 +8730,7 @@ async function processSale() {
         tBtn.textContent = '🖨️ Imprimir Ticket';
       }
       rememberRecentTicket(lastSaleData);
-      printTicket(lastSaleData, shouldAutoPrint);
+      printTicket(lastSaleData, shouldAutoPrint, !shouldAutoPrint, true);
 
       currentCart = [];
       currentDiscount = { type: 'percent', value: 0 };
@@ -8843,7 +8864,7 @@ async function processSale() {
       tBtn.textContent = '🖨️ Imprimir Ticket';
     }
     rememberRecentTicket(lastSaleData);
-    printTicket(lastSaleData, shouldAutoPrint);
+    printTicket(lastSaleData, shouldAutoPrint, !shouldAutoPrint, true);
 
     // 7. Reset POS state
     currentCart = [];
