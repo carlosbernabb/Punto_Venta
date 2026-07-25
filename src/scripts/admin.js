@@ -5395,29 +5395,72 @@ function closeModal() {
   window.electronAPI?.refocusWindow?.();
 }
 
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', durationMs = null) {
+  let container = document.getElementById('appToastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'appToastContainer';
+    container.style.cssText = [
+      'position:fixed',
+      'top:20px',
+      'right:20px',
+      'z-index:10000',
+      'display:flex',
+      'flex-direction:column',
+      'gap:10px',
+      'width:min(560px,calc(100vw - 40px))',
+      'pointer-events:none'
+    ].join(';');
+    document.body.appendChild(container);
+  }
+
   const toast = document.createElement('div');
   toast.className = `alert alert-${type}`;
-  // Add styles dynamically or use existing css
-  toast.style.position = 'fixed';
-  toast.style.top = '20px';
-  toast.style.right = '20px';
-  toast.style.padding = '1rem';
-  toast.style.borderRadius = 'var(--radius-md)';
-  toast.style.background = 'white';
-  toast.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-  toast.style.zIndex = '10000';
-  toast.textContent = message;
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  toast.style.cssText = [
+    'position:relative',
+    'padding:14px 42px 14px 16px',
+    'border-radius:var(--radius-md)',
+    'background:white',
+    'box-shadow:0 6px 20px rgba(0,0,0,0.2)',
+    'font-size:0.92rem',
+    'font-weight:600',
+    'line-height:1.45',
+    'white-space:normal',
+    'overflow-wrap:anywhere',
+    'max-height:40vh',
+    'overflow-y:auto',
+    'pointer-events:auto'
+  ].join(';');
 
-  // Add color bar based on type
-  if (type === 'success') toast.style.borderLeft = '4px solid var(--success)';
-  if (type === 'error') toast.style.borderLeft = '4px solid var(--error)';
+  const color = {
+    success: 'var(--success, #16a34a)',
+    error: 'var(--error, #dc2626)',
+    warning: '#d99a00',
+    info: '#2563eb'
+  }[type] || '#2563eb';
+  toast.style.borderLeft = `5px solid ${color}`;
 
-  document.body.appendChild(toast);
+  const text = document.createElement('div');
+  text.textContent = String(message || '');
+  toast.appendChild(text);
 
-  setTimeout(() => {
-    toast.remove();
-  }, 3000);
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.textContent = '×';
+  closeButton.setAttribute('aria-label', 'Cerrar aviso');
+  closeButton.style.cssText = 'position:absolute;top:7px;right:9px;border:0;background:transparent;color:#64748b;font-size:1.35rem;line-height:1;cursor:pointer;padding:4px;';
+  closeButton.onclick = () => toast.remove();
+  toast.appendChild(closeButton);
+  container.appendChild(toast);
+
+  const messageLength = String(message || '').length;
+  const defaultDuration = type === 'error'
+    ? Math.min(15000, Math.max(8000, 5000 + messageLength * 30))
+    : type === 'warning'
+      ? Math.min(12000, Math.max(6500, 4000 + messageLength * 25))
+      : 4500;
+  setTimeout(() => toast.remove(), durationMs ?? defaultDuration);
 }
 
 function togglePasswordVisibility(inputId, button) {
@@ -7315,20 +7358,31 @@ async function searchProduct(query, isEnter = false) {
   }
 }
 
-async function addToCart(product) {
+let posCartMutationQueue = Promise.resolve();
+
+function addToCart(product) {
+  const pending = posCartMutationQueue.then(() => addToCartNow(product));
+  // Mantener la cola utilizable incluso si una consulta individual falla.
+  posCartMutationQueue = pending.catch(() => {});
+  return pending;
+}
+
+async function addToCartNow(product) {
   try {
-    const inv = await getInventoryRow(posCurrentStoreId, product.id);
+    // El cache puede quedar atras si otra caja, compra o transferencia mueve stock.
+    const inv = await getInventoryRow(posCurrentStoreId, product.id, true);
     const currentStock = inv ? parseFloat(inv.quantity || 0) : 0;
     const existingItem = currentCart.find(item => item.id === product.id);
     const requestedQty = existingItem ? existingItem.quantity + 1 : 1;
 
     if (currentStock < requestedQty) {
-      showToast('⚠️ No está disponible este producto (Sin stock en tienda)', 'warning');
+      const missingQty = Math.round((requestedQty - currentStock) * 1000) / 1000;
+      showToast(`No se puede agregar "${product.name}". Stock solicitado: ${requestedQty}; disponible en esta tienda: ${currentStock}; faltan ${missingQty} pieza(s).`, 'error');
       return;
     }
   } catch (err) {
     console.error('Error verificando stock:', err);
-    showToast('⚠️ No está disponible este producto (Error consultando stock)', 'warning');
+    showToast(`No se pudo verificar el stock de "${product.name}", por lo que no fue agregado. Revisa la conexión y vuelve a intentarlo.`, 'error');
     return;
   }
 
@@ -7342,11 +7396,16 @@ async function addToCart(product) {
       wholesale: parseFloat(product.wholesale_price || 0),
       distributor: parseFloat(product.distributor_price || 0)
     };
+    const selectedPrice = getCartPriceForMode({ name: product.name, prices }, currentPriceMode);
+    if (!selectedPrice.price) {
+      showToast(`No se puede agregar "${product.name}" a esta venta: no tiene precio ${getPriceModeName(currentPriceMode)} configurado. Registra ese precio en Productos y vuelve a intentarlo.`, 'error');
+      return;
+    }
     currentCart.push({
       id: product.id,
       name: product.name,
       prices,
-      price: prices[currentPriceMode], // Active price based on current mode
+      price: selectedPrice.price,
       cost: parseFloat(product.cost_price || 0),
       quantity: 1,
       barcode: product.barcode
@@ -7361,35 +7420,41 @@ function removeFromCart(index) {
   renderCart();
 }
 
+function getPriceModeName(mode) {
+  return ({ retail: 'Menudeo', wholesale: 'Mayoreo', distributor: 'Distribuidor' })[mode] || mode;
+}
+
+function getCartPriceForMode(item, mode) {
+  const requestedPrice = parseFloat(item?.prices?.[mode] || 0);
+  return { price: requestedPrice > 0 ? requestedPrice : 0 };
+}
+
 // Switch price mode for all cart items
 window.setPriceMode = function (mode) {
-  // Translate mode keys for the error message
-  const modeNames = { retail: 'Menudeo', wholesale: 'Mayoreo', distributor: 'Distribuidor' };
+  const resolvedPrices = currentCart.map(item => ({
+    item,
+    resolved: getCartPriceForMode(item, mode)
+  }));
+  const invalidItems = resolvedPrices.filter(entry => entry.resolved.price <= 0);
 
-  // Validar si algún producto NO tiene el precio configurado
-  const missingPrices = currentCart.filter(item => {
-    return !item.prices || parseFloat(item.prices[mode] || 0) <= 0;
-  });
-
-  if (missingPrices.length > 0) {
-    const nombres = missingPrices.map(p => p.name).join(', ');
-    showToast(`⚠️ No se puede aplicar: Falta configurar el precio de ${modeNames[mode] || mode} en: ${nombres}`, 'warning');
-    return; // Bloquear cambio
+  if (invalidItems.length > 0) {
+    const nombres = invalidItems.map(entry => entry.item.name).join(', ');
+    showToast(`No se puede aplicar el precio ${getPriceModeName(mode)}. Falta configurar ese precio en ${invalidItems.length} producto(s): ${nombres}. La venta permanece con el tipo de precio anterior.`, 'error');
+    return { applied: false, missingItems: invalidItems.map(entry => entry.item) };
   }
 
   currentPriceMode = mode;
 
   // Update price of every item in cart
-  currentCart.forEach(item => {
-    if (item.prices) {
-      item.price = item.prices[mode] || item.prices.retail;
-    }
+  resolvedPrices.forEach(({ item, resolved }) => {
+    item.price = resolved.price;
   });
 
   // Update button styles
   syncPriceModeButtons(mode);
 
   renderCart();
+  return { applied: true, missingItems: [] };
 };
 
 async function updateQuantity(index, newQty) {
@@ -7412,16 +7477,20 @@ async function updateQuantity(index, newQty) {
 
   const item = currentCart[index];
   try {
-    const inv = await getInventoryRow(posCurrentStoreId, item.id);
+    const inv = await getInventoryRow(posCurrentStoreId, item.id, true);
     const currentStock = inv ? parseFloat(inv.quantity || 0) : 0;
 
     if (parsedQty > currentStock) {
-      showToast('⚠️ Sobrepasas el stock disponible (' + currentStock + ')', 'warning');
+      const missingQty = Math.round((parsedQty - currentStock) * 1000) / 1000;
+      showToast(`No se puede cambiar la cantidad de "${item.name}". Solicitado: ${parsedQty}; disponible en esta tienda: ${currentStock}; faltan ${missingQty} pieza(s).`, 'error');
       renderCart(); // revert to old qty in UI
       return;
     }
   } catch (err) {
     console.error('Error verificando stock:', err);
+    showToast(`No se pudo verificar el stock actualizado de "${item.name}". La cantidad anterior se conserva.`, 'error');
+    renderCart();
+    return;
   }
 
   currentCart[index].quantity = parsedQty;
@@ -7873,24 +7942,11 @@ window.linkCustomerToSale = async function () {
 
     if (!customer) {
       showToast('Cliente no encontrado', 'error');
-      btn.textContent = originalText;
-      btn.disabled = false;
       return;
     }
 
-    // 2. Set global state
-    posCurrentCustomer = customer;
-
-    // 3. Update UI (Customer Section)
-    input.style.display = 'none';
-    btn.style.display = 'none';
-
-    const nameEl = document.getElementById('posActiveCustomerName');
-    nameEl.textContent = customer.name;
-    nameEl.style.display = 'block';
-    document.getElementById('btnClearCustomer').style.display = 'block';
-
-    // 4. Map and Apply Price Type
+    // Validar y aplicar el precio antes de asociar visualmente al cliente.
+    // Si falta un precio, no dejamos cliente y carrito en estados contradictorios.
     const typeMap = {
       'menudeo': 'retail',
       'mayoreo': 'wholesale',
@@ -7900,9 +7956,23 @@ window.linkCustomerToSale = async function () {
 
     const mappedMode = typeMap[customer.customer_type] || 'retail';
 
-    if (typeof setPriceMode === 'function') {
-      setPriceMode(mappedMode);
+    const priceModeResult = typeof setPriceMode === 'function'
+      ? setPriceMode(mappedMode)
+      : { applied: true, missingItems: [] };
+
+    if (priceModeResult?.applied === false) {
+      return;
     }
+
+    // El precio es valido para todo el carrito: ahora si asociar el cliente.
+    posCurrentCustomer = customer;
+    input.style.display = 'none';
+    btn.style.display = 'none';
+
+    const nameEl = document.getElementById('posActiveCustomerName');
+    nameEl.textContent = customer.name;
+    nameEl.style.display = 'block';
+    document.getElementById('btnClearCustomer').style.display = 'block';
 
     // 5. Apply special discount if applicable
     if (customer.customer_type === 'especial' && customer.discount_percentage > 0) {
@@ -7911,7 +7981,7 @@ window.linkCustomerToSale = async function () {
       applyDiscount();
       showToast(`Cliente Especial: ${customer.discount_percentage}% desc. aplicado`, 'info');
     } else {
-      showToast(`Cliente asociado: Precio ${mappedMode} activado`, 'success');
+      showToast(`Cliente "${customer.name}" asociado. Precio ${getPriceModeName(mappedMode)} aplicado correctamente.`, 'success');
     }
 
     // 6. Fetch Recent Purchases
@@ -7972,7 +8042,7 @@ window.linkCustomerToSale = async function () {
 
   } catch (err) {
     console.error('Error linking customer:', err);
-    showToast('Error al buscar cliente', 'error');
+    showToast(`No se pudo asociar el cliente: ${err.message || 'error al consultar sus datos'}.`, 'error');
   } finally {
     btn.textContent = originalText;
     btn.disabled = false;
@@ -8409,8 +8479,63 @@ function isMissingRpcError(error) {
   return msg.includes('function') && (msg.includes('does not exist') || msg.includes('not found'));
 }
 
-async function getInventoryRow(storeId, productId) {
-  return await getCachedInventoryRow(storeId, productId);
+async function getInventoryRow(storeId, productId, force = false) {
+  if (force) {
+    const rows = await getCachedProductInventory(productId, true);
+    return rows.find(row => row.store_id === storeId) || null;
+  }
+  return await getCachedInventoryRow(storeId, productId, force);
+}
+
+function validateCurrentCartPrices(mode = currentPriceMode) {
+  return currentCart.filter(item => parseFloat(item?.prices?.[mode] || 0) <= 0);
+}
+
+function describeMissingPrices(items, mode = currentPriceMode) {
+  const names = items.map(item => item.name).join(', ');
+  return `No se puede registrar la venta con precio ${getPriceModeName(mode)}. Falta configurar ese precio en ${items.length} producto(s): ${names}.`;
+}
+
+async function validateCurrentCartStock() {
+  const inventoryRows = await getCachedStoreInventory(posCurrentStoreId, true);
+  const inventoryByProduct = new Map(
+    inventoryRows.map(row => [row.product_id, parseFloat(row.quantity || 0)])
+  );
+
+  return currentCart
+    .map(item => ({
+      item,
+      requested: parseFloat(item.quantity || 0),
+      available: inventoryByProduct.get(item.id) || 0
+    }))
+    .filter(entry => entry.requested > entry.available);
+}
+
+function describeStockShortages(shortages) {
+  return shortages
+    .map(({ item, requested, available }) => {
+      const missing = Math.round((requested - available) * 1000) / 1000;
+      return `${item.name}: solicitado ${requested}, disponible ${available}, faltan ${missing}`;
+    })
+    .join('; ');
+}
+
+async function getFriendlySaleError(error) {
+  const rawMessage = error?.message || 'Error desconocido';
+  const productId = rawMessage.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0];
+  if (!productId || !rawMessage.toLowerCase().includes('stock insuficiente')) return rawMessage;
+
+  const item = currentCart.find(cartItem => cartItem.id === productId);
+  if (!item) return rawMessage;
+
+  try {
+    const inventory = await getInventoryRow(posCurrentStoreId, productId, true);
+    const available = parseFloat(inventory?.quantity || 0);
+    const missing = Math.max(0, Math.round((parseFloat(item.quantity || 0) - available) * 1000) / 1000);
+    return `No se puede registrar la venta. Stock insuficiente para ${item.name}: solicitado ${item.quantity}, disponible ${available}, faltan ${missing} pieza(s).`;
+  } catch (_) {
+    return `Stock insuficiente para ${item.name}.`;
+  }
 }
 
 async function restoreInventory(storeId, productId, qty) {
@@ -8663,6 +8788,12 @@ async function processSale() {
     return;
   }
 
+  const missingPriceItems = validateCurrentCartPrices(currentPriceMode);
+  if (missingPriceItems.length > 0) {
+    showToast(describeMissingPrices(missingPriceItems, currentPriceMode), 'error');
+    return;
+  }
+
   const processBtn = document.getElementById('btnProcessSale');
   processBtn.disabled = true;
   posSaleProcessing = true;
@@ -8671,6 +8802,13 @@ async function processSale() {
   processBtn.textContent = '⏳ Procesando...';
 
   try {
+    // Revalidar todo el carrito con inventario fresco antes del RPC atomico.
+    // Asi un cache viejo no llega al cobro y el mensaje incluye nombres.
+    const stockShortages = await validateCurrentCartStock();
+    if (stockShortages.length > 0) {
+      throw new Error(`No se puede registrar la venta. Stock insuficiente en ${stockShortages.length} producto(s): ${describeStockShortages(stockShortages)}.`);
+    }
+
     const employeeId = currentUser?.id || null;
     const saleItemsPayload = currentCart.map(item => ({
       product_id: item.id,
@@ -8893,7 +9031,8 @@ async function processSale() {
     } catch (rollbackError) {
       console.error('Sale rollback error:', rollbackError);
     }
-    showToast('Error al procesar venta: ' + error.message, 'error');
+    const friendlyError = await getFriendlySaleError(error);
+    showToast('Error al procesar venta: ' + friendlyError, 'error');
     posSaleProcessing = false;
     processBtn.disabled = false;
     processBtn.textContent = '⚠️ Reintentar';
