@@ -125,6 +125,11 @@ function supabaseRestUrl(table, params = {}) {
   return endpoint.toString();
 }
 
+function supabaseRpcUrl(functionName) {
+  const { url } = getSupabaseConfig();
+  return `${url}/rest/v1/rpc/${functionName}`;
+}
+
 async function fetchSupabaseRestPage(table, params, from, to) {
   return requestJsonOrText(supabaseRestUrl(table, params), {
     method: 'GET',
@@ -189,7 +194,7 @@ async function loadInventorySnapshot(storeId) {
       order: 'name.asc'
     }),
     fetchSupabaseRestAll('inventory', {
-      select: 'id,product_id,store_id,quantity,min_stock',
+      select: 'id,product_id,store_id,quantity,min_stock,updated_at',
       store_id: `eq.${storeId}`
     })
   ]);
@@ -208,84 +213,66 @@ async function loadInventorySnapshot(storeId) {
       brand: product.brand?.name || '',
       category: product.category?.name || '',
       quantity: parseFloat(stock.quantity || 0),
-      min_stock: stock.min_stock == null ? 10 : parseInt(stock.min_stock || 0)
+      min_stock: stock.min_stock == null ? 10 : parseInt(stock.min_stock || 0),
+      updated_at: stock.updated_at || null
     };
   });
 }
 
-async function getInventoryRow(storeId, productId) {
-  const rows = await fetchSupabaseRestAll('inventory', {
-    select: 'id,product_id,store_id,quantity,min_stock',
-    store_id: `eq.${storeId}`,
-    product_id: `eq.${productId}`
-  }, 1);
-  return rows[0] || null;
-}
-
-async function upsertInventoryCount(session, productId, quantity, minStock, productName = '') {
-  const oldRow = await getInventoryRow(session.storeId, productId);
-  const oldQty = parseFloat(oldRow?.quantity || 0);
-  const deltaQty = quantity - oldQty;
-  const savedAt = new Date().toISOString();
+async function upsertInventoryCount(
+  session,
+  productId,
+  quantity,
+  minStock,
+  expectedUpdatedAt,
+  requestId,
+  productName = ''
+) {
   const payload = Buffer.from(JSON.stringify({
-    store_id: session.storeId,
-    product_id: productId,
-    quantity,
-    min_stock: minStock,
-    updated_at: savedAt
+    p_store_id: session.storeId,
+    p_product_id: productId,
+    p_quantity: quantity,
+    p_min_stock: minStock,
+    p_employee_id: session.employeeId || null,
+    p_expected_updated_at: expectedUpdatedAt || null,
+    p_request_id: requestId,
+    p_source: 'qr'
   }), 'utf8');
 
-  await requestJsonOrText(supabaseRestUrl('inventory', {
-    on_conflict: 'store_id,product_id'
-  }), {
+  const saved = await requestJsonOrText(supabaseRpcUrl('apply_inventory_count_v2'), {
     method: 'POST',
     headers: supabaseHeaders({
       'Content-Type': 'application/json',
       'Content-Length': payload.length,
-      Prefer: 'resolution=merge-duplicates,return=minimal'
+      Prefer: 'return=representation'
     })
   }, payload);
 
-  if (deltaQty !== 0 && session.employeeId) {
-    const logPayload = Buffer.from(JSON.stringify({
-      store_id: session.storeId,
-      product_id: productId,
-      employee_id: session.employeeId,
-      type: 'ajuste',
-      quantity: deltaQty,
-      description: 'Ajuste desde iPad por QR'
-    }), 'utf8');
-
-    await requestJsonOrText(supabaseRestUrl('inventory_logs'), {
-      method: 'POST',
-      headers: supabaseHeaders({
-        'Content-Type': 'application/json',
-        'Content-Length': logPayload.length,
-        Prefer: 'return=minimal'
-      })
-    }, logPayload);
+  if (!saved || !['ok', 'conflict'].includes(saved.status)) {
+    throw new Error('Supabase no devolvio una confirmacion valida del inventario');
   }
 
-  if (mainWindow && !mainWindow.isDestroyed()) {
+  if (saved.status === 'ok' && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('inventory-count-updated', {
       storeId: session.storeId,
       storeName: session.storeName,
       productId,
       productName,
-      quantity,
-      minStock,
-      oldQty,
-      deltaQty,
-      savedAt
+      quantity: parseFloat(saved.quantity || 0),
+      minStock: parseInt(saved.minStock || 0, 10),
+      oldQty: parseFloat(saved.oldQty || 0),
+      deltaQty: parseFloat(saved.deltaQty || 0),
+      savedAt: saved.updatedAt
     });
   }
 
   return {
-    savedAt,
-    oldQty,
-    deltaQty,
-    quantity,
-    minStock
+    ...saved,
+    quantity: parseFloat(saved.quantity || 0),
+    minStock: parseInt(saved.minStock || 0, 10),
+    oldQty: saved.oldQty == null ? null : parseFloat(saved.oldQty),
+    deltaQty: saved.deltaQty == null ? null : parseFloat(saved.deltaQty),
+    savedAt: saved.updatedAt || null
   };
 }
 
@@ -502,6 +489,9 @@ function getInventoryCountPage(session) {
     const logList = document.getElementById('logList');
     let products = [];
     let logEntries = [];
+    const dirtyProductIds = new Set();
+    const pendingRequestIds = new Map();
+    let inventoryRefreshTimer = null;
 
     function escapeHtml(value) {
       return String(value || '').replace(/[&<>"']/g, (char) => ({
@@ -529,12 +519,32 @@ function getInventoryCountPage(session) {
       ).join('');
     }
 
-    async function loadInventory() {
+    function newRequestId() {
+      if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(char) {
+        const random = Math.random() * 16 | 0;
+        return (char === 'x' ? random : (random & 0x3 | 0x8)).toString(16);
+      });
+    }
+
+    async function loadInventory(silent = false) {
       const response = await fetch(location.pathname + '/data');
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || 'No se pudo cargar inventario');
-      products = result.products || [];
-      render();
+      const incoming = result.products || [];
+
+      if (!products.length) {
+        products = incoming;
+      } else {
+        const currentById = new Map(products.map(product => [product.id, product]));
+        products = incoming.map(product => {
+          const current = currentById.get(product.id);
+          return current && dirtyProductIds.has(product.id) ? current : product;
+        });
+      }
+
+      const activeElement = document.activeElement;
+      if (!silent || !activeElement || !activeElement.matches('input[type=number]')) render();
     }
 
     function render() {
@@ -563,6 +573,16 @@ function getInventoryCountPage(session) {
           '<div class="status"></div>' +
         '</section>';
       }).join('');
+
+      list.querySelectorAll('.qty, .min').forEach(input => {
+        input.addEventListener('input', () => {
+          const productId = input.closest('[data-id]')?.dataset.id;
+          if (productId) dirtyProductIds.add(productId);
+        });
+        input.addEventListener('blur', () => {
+          if (!list.querySelector('input[type=number]:focus')) render();
+        });
+      });
     }
 
     async function saveItem(productId) {
@@ -582,18 +602,51 @@ function getInventoryCountPage(session) {
       status.className = 'status';
       try {
         const product = products.find(p => p.id === productId);
+        const requestId = pendingRequestIds.get(productId) || newRequestId();
+        pendingRequestIds.set(productId, requestId);
         const response = await fetch(location.pathname + '/item', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ productId, quantity, minStock, productName: product?.name || '' })
+          body: JSON.stringify({
+            productId,
+            quantity,
+            minStock,
+            productName: product?.name || '',
+            expectedUpdatedAt: product?.updated_at || null,
+            requestId
+          })
         });
         const result = await response.json();
-        if (!response.ok || !result.ok) throw new Error(result.error || 'No se pudo guardar');
-        if (product) {
-          product.quantity = quantity;
-          product.min_stock = minStock;
+        if (response.status === 409 && result.conflict) {
+          pendingRequestIds.delete(productId);
+          dirtyProductIds.delete(productId);
+          if (product) {
+            product.quantity = Number(result.quantity || 0);
+            product.min_stock = Number(result.minStock || 0);
+            product.updated_at = result.updatedAt || null;
+          }
+          row.querySelector('.qty').value = Number(result.quantity || 0);
+          row.querySelector('.min').value = Number(result.minStock || 0);
+          const conflictText = 'No se guardo: otro dispositivo cambio este producto. Valor vigente: '
+            + Number(result.quantity || 0) + '. Revisa y captura de nuevo.';
+          status.textContent = conflictText;
+          status.className = 'status error';
+          addLog((product?.name || 'Producto') + ': ' + conflictText, 'error');
+          return;
         }
-        const savedText = 'Guardado correctamente ' + formatTime(result.savedAt) + '. Cantidad: ' + quantity + ', minimo: ' + minStock + '.';
+        if (!response.ok || !result.ok) throw new Error(result.error || 'No se pudo guardar');
+        pendingRequestIds.delete(productId);
+        dirtyProductIds.delete(productId);
+        if (product) {
+          product.quantity = Number(result.quantity || 0);
+          product.min_stock = Number(result.minStock || 0);
+          product.updated_at = result.updatedAt || result.savedAt || null;
+        }
+        row.querySelector('.qty').value = Number(result.quantity || 0);
+        row.querySelector('.min').value = Number(result.minStock || 0);
+        const savedText = 'Confirmado en la base ' + formatTime(result.savedAt)
+          + '. Cantidad: ' + Number(result.quantity || 0)
+          + ', minimo: ' + Number(result.minStock || 0) + '.';
         status.textContent = savedText;
         status.className = 'status ok';
         addLog((product?.name || 'Producto') + ': ' + savedText, 'ok', result.savedAt);
@@ -635,6 +688,11 @@ function getInventoryCountPage(session) {
 
     search.addEventListener('input', render);
     pingBtn.addEventListener('click', testLink);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        loadInventory(true).catch(error => addLog(error.message || 'No se pudo actualizar inventario', 'error'));
+      }
+    });
 
     // ── Barcode Scanner ──────────────────────────────────────────────────────
     var scanBtn = document.getElementById('scanBtn');
@@ -816,6 +874,10 @@ function getInventoryCountPage(session) {
       count.textContent = 'Error';
       addLog(error.message || 'Error al cargar inventario', 'error');
     });
+    inventoryRefreshTimer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      loadInventory(true).catch(error => addLog(error.message || 'No se pudo actualizar inventario', 'error'));
+    }, 10000);
   </script>
 </body>
 </html>`;
@@ -944,7 +1006,17 @@ function startPhotoUploadServer() {
           const payload = JSON.parse(body || '{}');
           const quantity = parseFloat(payload.quantity);
           const minStock = parseInt(payload.minStock, 10);
-          if (!payload.productId || Number.isNaN(quantity) || quantity < 0 || Number.isNaN(minStock) || minStock < 0) {
+          const requestId = String(payload.requestId || '');
+          const expectedUpdatedAt = payload.expectedUpdatedAt || null;
+          if (
+            !payload.productId
+            || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)
+            || Number.isNaN(quantity)
+            || quantity < 0
+            || Math.round(quantity * 1000) / 1000 !== quantity
+            || Number.isNaN(minStock)
+            || minStock < 0
+          ) {
             sendJson(response, { ok: false, error: 'Cantidades invalidas' }, 400);
             return;
           }
@@ -954,8 +1026,19 @@ function startPhotoUploadServer() {
             payload.productId,
             quantity,
             minStock,
+            expectedUpdatedAt,
+            requestId,
             String(payload.productName || '')
           );
+          if (saved.status === 'conflict') {
+            sendJson(response, {
+              ok: false,
+              conflict: true,
+              error: 'El inventario cambio en otro dispositivo. No se sobrescribio el valor nuevo.',
+              ...saved
+            }, 409);
+            return;
+          }
           sendJson(response, { ok: true, ...saved });
           return;
         }

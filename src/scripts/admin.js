@@ -294,7 +294,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const promise = fetchPaged(() => supabaseClient
       .from('inventory')
-      .select('id, product_id, store_id, quantity, min_stock')
+      .select('id, product_id, store_id, quantity, min_stock, updated_at')
       .eq('store_id', storeId))
       .then(rows => {
         sessionCache.inventoryByStore.set(storeId, rows);
@@ -320,7 +320,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const promise = supabaseClient
       .from('inventory')
-      .select('id, product_id, store_id, quantity, min_stock')
+      .select('id, product_id, store_id, quantity, min_stock, updated_at')
       .eq('product_id', productId)
       .then(({ data, error }) => {
         if (error) throw error;
@@ -386,6 +386,70 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function getCachedInventoryRow(storeId, productId, force = false) {
     const rows = await getCachedStoreInventory(storeId, force);
     return rows.find(row => row.product_id === productId) || null;
+  }
+
+  function createRequestId() {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
+      const random = Math.random() * 16 | 0;
+      return (char === 'x' ? random : (random & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  async function applyInventoryCountAtomic({
+    storeId,
+    productId,
+    quantity,
+    minStock,
+    expectedUpdatedAt,
+    source = 'desktop',
+    requestId = createRequestId()
+  }) {
+    const { data, error } = await supabaseClient.rpc('apply_inventory_count_v2', {
+      p_store_id: storeId,
+      p_product_id: productId,
+      p_quantity: quantity,
+      p_min_stock: minStock,
+      p_employee_id: currentUser?.id || null,
+      p_expected_updated_at: expectedUpdatedAt || null,
+      p_request_id: requestId,
+      p_source: source
+    });
+
+    if (error) throw error;
+    if (!data || !['ok', 'conflict'].includes(data.status)) {
+      throw new Error('La base no devolvio una confirmacion valida del inventario');
+    }
+    return data;
+  }
+
+  async function transferInventoryBatchAtomic({
+    sourceStoreId,
+    destStoreId,
+    items,
+    transferId,
+    requestId = createRequestId()
+  }) {
+    const payloadItems = items.map(item => ({
+      product_id: item.product_id,
+      quantity: parseInt(item.quantity || 0)
+    }));
+
+    const { data, error } = await supabaseClient.rpc('transfer_inventory_batch_v2', {
+      p_source_store_id: sourceStoreId,
+      p_dest_store_id: destStoreId,
+      p_employee_id: currentUser?.id || null,
+      p_items: payloadItems,
+      p_request_id: requestId,
+      p_transfer_id: transferId
+    });
+
+    if (error) throw error;
+    if (!data || data.status !== 'ok' || data.transferId !== transferId) {
+      throw new Error('La base no devolvio una confirmacion valida de la transferencia');
+    }
+
+    return data;
   }
 
   function cacheProduct(product) {
@@ -462,7 +526,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (row.store_id === globalCurrentStoreId && Array.isArray(globalInventoryProducts)) {
       const product = globalInventoryProducts.find(p => p.id === row.product_id);
       if (product) {
-        product.current_qty = parseInt(row.quantity || 0);
+        product.current_qty = parseFloat(row.quantity || 0);
+        product.current_updated_at = row.updated_at || product.current_updated_at || null;
         if (Object.prototype.hasOwnProperty.call(row, 'min_stock')) {
           product.current_min = row.min_stock !== null ? parseInt(row.min_stock || 0) : 10;
         }
@@ -2712,7 +2777,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const stockMap = {};
       if (inventory) {
-        inventory.forEach(i => stockMap[i.store_id] = i.quantity);
+        inventory.forEach(i => {
+          stockMap[i.store_id] = {
+            quantity: parseFloat(i.quantity || 0),
+            minStock: i.min_stock == null ? 10 : parseInt(i.min_stock || 0),
+            updatedAt: i.updated_at || null
+          };
+        });
       }
 
       const modalHTML = `
@@ -2739,8 +2810,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                         <span class="mr-2 font-weight-bold text-muted small text-uppercase">Cant:</span>
                         <input type="number" name="qty_${store.id}" 
                                class="form-control font-weight-bold text-dark" 
-                               value="${stockMap[store.id] || 0}" 
-                               min="0" step="1" 
+                               value="${stockMap[store.id]?.quantity || 0}"
+                               min="0" step="0.001"
                                onfocus="this.select()"
                                style="width: 80px; text-align: right; font-size: 1.4rem; border: none; background: transparent; padding: 0;">
                       </div>
@@ -2778,24 +2849,32 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         try {
           for (const store of stores) {
-            const qty = parseInt(formData.get(`qty_${store.id}`)) || 0;
+            const qty = parseFloat(formData.get(`qty_${store.id}`)) || 0;
+            const previous = stockMap[store.id] || { quantity: 0, minStock: 10, updatedAt: null };
+            if (qty === previous.quantity) continue;
 
-            // Updated: Removed organization_id
-            const { error } = await supabaseClient
-              .from('inventory')
-              .upsert({
-                store_id: store.id,
-                product_id: productId,
-                quantity: qty,
-                updated_at: new Date()
-              }, { onConflict: 'store_id, product_id' });
+            const saved = await applyInventoryCountAtomic({
+              storeId: store.id,
+              productId,
+              quantity: qty,
+              minStock: previous.minStock,
+              expectedUpdatedAt: previous.updatedAt,
+              source: 'distribution'
+            });
 
-            if (error) throw error;
+            if (saved.status === 'conflict') {
+              throw new Error(
+                `${store.name} cambio en otro dispositivo. Valor vigente: ${Number(saved.quantity || 0)}. `
+                + 'Se detuvo el guardado para no sobrescribirlo.'
+              );
+            }
+
             cacheInventoryRow({
               store_id: store.id,
               product_id: productId,
-              quantity: qty,
-              updated_at: new Date().toISOString()
+              quantity: parseFloat(saved.quantity || 0),
+              min_stock: parseInt(saved.minStock || previous.minStock, 10),
+              updated_at: saved.updatedAt
             });
           }
 
@@ -3050,7 +3129,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         inventory.forEach(item => {
           stockMap[item.product_id] = {
             qty: item.quantity,
-            min: item.min_stock
+            min: item.min_stock,
+            updatedAt: item.updated_at || null
           };
         });
       }
@@ -3063,11 +3143,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Cachear datos
       globalInventoryProducts = products.map(p => {
-        const stockData = stockMap[p.id] || { qty: 0, min: 10 };
+        const stockData = stockMap[p.id] || { qty: 0, min: 10, updatedAt: null };
         return {
           ...p,
           current_qty: stockData.qty,
-          current_min: stockData.min !== null ? stockData.min : 10
+          current_min: stockData.min !== null ? stockData.min : 10,
+          current_updated_at: stockData.updatedAt
         };
       });
 
@@ -3559,49 +3640,57 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
 
-      // Find old qty to calculate the difference
       const prod = globalInventoryProducts.find(p => p.id === productId);
-      const oldQty = prod ? prod.current_qty : 0;
-      const deltaQty = qty - oldQty;
+      const saved = await applyInventoryCountAtomic({
+        storeId,
+        productId,
+        quantity: qty,
+        minStock,
+        expectedUpdatedAt: prod?.current_updated_at || null,
+        source: 'desktop'
+      });
 
-      const { error } = await supabaseClient
-        .from('inventory')
-        .upsert({
+      if (saved.status === 'conflict') {
+        const authoritativeQty = parseFloat(saved.quantity || 0);
+        const authoritativeMin = parseInt(saved.minStock || 0, 10);
+        if (prod) {
+          prod.current_qty = authoritativeQty;
+          prod.current_min = authoritativeMin;
+          prod.current_updated_at = saved.updatedAt || null;
+        }
+        cacheInventoryRow({
           store_id: storeId,
           product_id: productId,
-          quantity: qty,
-          min_stock: minStock,
-          updated_at: new Date()
-        }, { onConflict: 'store_id, product_id' });
+          quantity: authoritativeQty,
+          min_stock: authoritativeMin,
+          updated_at: saved.updatedAt || null
+        });
+        renderInventoryTable(document.getElementById('inventorySearchInput')?.value.toLowerCase().trim() || '');
+        showToast(
+          `No se sobrescribio el inventario: otro dispositivo lo cambio a ${authoritativeQty}. Revisa y captura de nuevo.`,
+          'warning'
+        );
+        return;
+      }
 
-      if (error) throw error;
+      const authoritativeQty = parseFloat(saved.quantity || 0);
+      const authoritativeMin = parseInt(saved.minStock || 0, 10);
       cacheInventoryRow({
         store_id: storeId,
         product_id: productId,
-        quantity: qty,
-        min_stock: minStock,
-        updated_at: new Date().toISOString()
+        quantity: authoritativeQty,
+        min_stock: authoritativeMin,
+        updated_at: saved.updatedAt
       });
 
-      // Insert log if there's a change in stock
-      if (deltaQty !== 0) {
-        await supabaseClient.from('inventory_logs').insert({
-          store_id: storeId,
-          product_id: productId,
-          employee_id: currentUser.id,
-          type: 'ajuste',
-          quantity: deltaQty,
-          description: deltaQty > 0 ? 'Ajuste manual (incremento)' : 'Ajuste manual (decremento)'
-        });
-      }
-
-      showToast('Stock actualizado', 'success');
+      showToast('Stock confirmado en la base de datos', 'success');
 
       // Actualizar cache local para que no revierta al filtrar
       const cachedProd = globalInventoryProducts.find(p => p.id === productId);
       if (cachedProd) {
-        cachedProd.current_qty = qty;
-        cachedProd.current_min = minStock;
+        cachedProd.current_qty = authoritativeQty;
+        cachedProd.current_min = authoritativeMin;
+        cachedProd.current_updated_at = saved.updatedAt;
       }
 
       // Re-renderizar para actualizar badges si cambiaron
@@ -3795,137 +3884,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     const productId = document.getElementById('transferProductId').value;
     const qty = parseInt(document.getElementById('transferQuantity').value);
 
-    let sourceData = null;
-    let sourceUpdated = false;
-
     try {
-      const { error: transferRpcError } = await supabaseClient.rpc('transfer_inventory', {
-        p_product_id: productId,
-        p_source_store_id: sourceStoreId,
-        p_dest_store_id: destStoreId,
-        p_qty: qty,
-        p_employee_id: currentUser.id
+      const transferId = `TR-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now().toString(36).toUpperCase()}`;
+      await transferInventoryBatchAtomic({
+        sourceStoreId,
+        destStoreId,
+        items: [{ product_id: productId, quantity: qty }],
+        transferId
       });
 
-      if (!transferRpcError) {
-        adjustCachedInventory(sourceStoreId, productId, -qty);
-        adjustCachedInventory(destStoreId, productId, qty);
-        await getCachedProductInventory(productId, true);
-        showToast('Transferencia completada con exito', 'success');
-        closeTransferModal();
-        loadInventoryTable(sourceStoreId);
-        return;
-      }
-
-      if (!isMissingRpcError(transferRpcError)) {
-        throw transferRpcError;
-      }
-
-      // 1. Get current stock for SOURCE
-      const { data: loadedSourceData, error: e1 } = await supabaseClient
-        .from('inventory')
-        .select('quantity, id')
-        .eq('store_id', sourceStoreId)
-        .eq('product_id', productId)
-        .single();
-
-
-      sourceData = loadedSourceData;
-      if (e1 || !sourceData) throw new Error("No se encontro stock origen");
-
-      if (sourceData.quantity < qty) throw new Error("Stock insuficiente en origen");
-
-      const newSourceQty = sourceData.quantity - qty;
-
-      // 2. Update SOURCE
-      const { error: e2 } = await supabaseClient
-        .from('inventory')
-        .update({ quantity: newSourceQty })
-        .eq('id', sourceData.id);
-
-      if (e2) throw e2;
-      sourceUpdated = true;
-
-      // 3. Check DESTINATION
-      const { data: destData, error: e3 } = await supabaseClient
-        .from('inventory')
-        .select('quantity, id')
-        .eq('store_id', destStoreId)
-        .eq('product_id', productId)
-        .maybeSingle(); // might not exist
-
-      if (destData) {
-        // Update existing DESTINATION record
-        const { error: e4 } = await supabaseClient
-          .from('inventory')
-          .update({ quantity: destData.quantity + qty })
-          .eq('id', destData.id);
-        if (e4) throw e4;
-        cacheInventoryRow({
-          ...destData,
-          store_id: destStoreId,
-          product_id: productId,
-          quantity: parseInt(destData.quantity || 0) + qty
-        });
-      } else {
-        // Insert new DESTINATION record
-        const { error: e5 } = await supabaseClient
-          .from('inventory')
-          .insert({
-            store_id: destStoreId,
-            product_id: productId,
-            quantity: qty,
-            min_stock: 10
-          });
-        if (e5) throw e5;
-        cacheInventoryRow({
-          store_id: destStoreId,
-          product_id: productId,
-          quantity: qty,
-          min_stock: 10
-        });
-      }
-      cacheInventoryRow({
-        ...sourceData,
-        store_id: sourceStoreId,
-        product_id: productId,
-        quantity: newSourceQty
-      });
-
-      // 4. Register Logs for both stores
-      await supabaseClient.from('inventory_logs').insert([
-        {
-          store_id: sourceStoreId,
-          product_id: productId,
-          employee_id: currentUser.id,
-          type: 'transferencia',
-          quantity: -qty,
-          description: 'Traspaso enviado'
-        },
-        {
-          store_id: destStoreId,
-          product_id: productId,
-          employee_id: currentUser.id,
-          type: 'transferencia',
-          quantity: qty,
-          description: 'Traspaso recibido'
-        }
-      ]);
-
-      showToast('Transferencia completada con éxito 📦➡️', 'success');
+      adjustCachedInventory(sourceStoreId, productId, -qty);
+      adjustCachedInventory(destStoreId, productId, qty);
+      await getCachedProductInventory(productId, true);
+      showToast('Transferencia completada con exito', 'success');
       closeTransferModal();
-
-      // Reload inventory table to reflect new quantities for current store
       loadInventoryTable(sourceStoreId);
+      return;
 
     } catch (err) {
       console.error("Transfer error", err);
-      if (sourceUpdated && sourceData?.id) {
-        await supabaseClient
-          .from('inventory')
-          .update({ quantity: sourceData.quantity })
-          .eq('id', sourceData.id);
-      }
       showToast(err.message || 'Error al ejecutar transferencia', 'error');
       btn.innerHTML = 'Confirmar Transferencia';
       btn.disabled = false;
@@ -4330,99 +4307,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   async function executeMultiInventoryTransfer({ sourceStore, destStore, items }) {
     const transferId = `TR-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now().toString(36).toUpperCase()}`;
-    const rollback = [];
-
-    for (const item of items) {
-      const qty = parseInt(item.quantity || 0);
-      if (!qty || qty < 1) throw new Error(`Cantidad invalida para ${item.name}`);
-
-      const { data: sourceRow, error: sourceError } = await supabaseClient
-        .from('inventory')
-        .select('id, product_id, store_id, quantity, min_stock')
-        .eq('store_id', sourceStore.id)
-        .eq('product_id', item.product_id)
-        .single();
-
-      if (sourceError || !sourceRow) throw new Error(`No hay stock origen para ${item.name}`);
-      if (parseInt(sourceRow.quantity || 0) < qty) throw new Error(`Stock insuficiente para ${item.name}`);
-
-      const { data: destRow, error: destError } = await supabaseClient
-        .from('inventory')
-        .select('id, product_id, store_id, quantity, min_stock')
-        .eq('store_id', destStore.id)
-        .eq('product_id', item.product_id)
-        .maybeSingle();
-
-      if (destError) throw destError;
-
-      const newSourceQty = parseInt(sourceRow.quantity || 0) - qty;
-      const { error: updateSourceError } = await supabaseClient
-        .from('inventory')
-        .update({ quantity: newSourceQty, updated_at: new Date().toISOString() })
-        .eq('id', sourceRow.id);
-
-      if (updateSourceError) throw updateSourceError;
-      rollback.push({ type: 'update', row: sourceRow });
-
-      if (destRow) {
-        const newDestQty = parseInt(destRow.quantity || 0) + qty;
-        const { error: updateDestError } = await supabaseClient
-          .from('inventory')
-          .update({ quantity: newDestQty, updated_at: new Date().toISOString() })
-          .eq('id', destRow.id);
-        if (updateDestError) throw updateDestError;
-        rollback.push({ type: 'update', row: destRow });
-        cacheInventoryRow({ ...destRow, quantity: newDestQty });
-      } else {
-        const { data: insertedDest, error: insertDestError } = await supabaseClient
-          .from('inventory')
-          .insert({
-            store_id: destStore.id,
-            product_id: item.product_id,
-            quantity: qty,
-            min_stock: sourceRow.min_stock ?? item.min_stock ?? 10,
-            updated_at: new Date().toISOString()
-          })
-          .select('id, product_id, store_id, quantity, min_stock')
-          .single();
-        if (insertDestError) throw insertDestError;
-        rollback.push({ type: 'delete', row: insertedDest });
-        cacheInventoryRow(insertedDest);
-      }
-
-      cacheInventoryRow({ ...sourceRow, quantity: newSourceQty });
-      item.source_stock_after = newSourceQty;
-    }
-
-    const logRows = items.flatMap(item => [
-      {
-        store_id: sourceStore.id,
-        product_id: item.product_id,
-        employee_id: currentUser.id,
-        type: 'transferencia',
-        quantity: -Math.abs(parseInt(item.quantity || 0)),
-        description: `Transferencia ${transferId} | Enviado a ${destStore.name} | Estado: completada`
-      },
-      {
-        store_id: destStore.id,
-        product_id: item.product_id,
-        employee_id: currentUser.id,
-        type: 'transferencia',
-        quantity: Math.abs(parseInt(item.quantity || 0)),
-        description: `Transferencia ${transferId} | Recibido de ${sourceStore.name} | Estado: completada`
-      }
-    ]);
-
-    const { error: logError } = await supabaseClient.from('inventory_logs').insert(logRows);
-    if (logError) {
-      await rollbackInventoryTransfer(rollback);
-      throw logError;
-    }
+    await transferInventoryBatchAtomic({
+      sourceStoreId: sourceStore.id,
+      destStoreId: destStore.id,
+      items,
+      transferId
+    });
 
     for (const item of items) {
       adjustCachedInventory(sourceStore.id, item.product_id, -Math.abs(parseInt(item.quantity || 0)));
       adjustCachedInventory(destStore.id, item.product_id, Math.abs(parseInt(item.quantity || 0)));
       await getCachedProductInventory(item.product_id, true);
+      item.source_stock_after = Math.max(
+        0,
+        parseInt(item.source_stock || 0) - Math.abs(parseInt(item.quantity || 0))
+      );
     }
 
     return {
@@ -4434,27 +4333,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       status: 'completada',
       items
     };
-  }
-
-  async function rollbackInventoryTransfer(rollback) {
-    for (const action of rollback.reverse()) {
-      try {
-        if (action.type === 'update') {
-          await supabaseClient
-            .from('inventory')
-            .update({
-              quantity: action.row.quantity,
-              min_stock: action.row.min_stock,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', action.row.id);
-        } else if (action.type === 'delete') {
-          await supabaseClient.from('inventory').delete().eq('id', action.row.id);
-        }
-      } catch (rollbackError) {
-        console.error('Transfer rollback error:', rollbackError);
-      }
-    }
   }
 
   async function loadInventoryTransferHistory() {
@@ -5074,7 +4952,7 @@ function getThermalTicketPreviewStyle() {
   // Expose to window
   window.openProductModal = openProductModal;
 
-  // Ctrl+Alt+D — Descuento rápido en Corte de Caja (sin registro en DB)
+  // Ctrl+Alt+D — retiro rapido de efectivo, registrado y auditable.
   document.addEventListener('keydown', (e) => {
     if (!e.ctrlKey || !e.altKey || e.key.toLowerCase() !== 'd') return;
     if (!document.getElementById('section-caja')?.classList.contains('active')) return;
@@ -5091,13 +4969,13 @@ function getThermalTicketPreviewStyle() {
         <div style="background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;padding:16px 22px;display:flex;justify-content:space-between;align-items:center;">
           <div>
             <div style="font-size:0.7rem;letter-spacing:2px;opacity:.8;text-transform:uppercase;">Corte de Caja</div>
-            <h3 style="margin:4px 0 0;font-size:1.1rem;">Descontar de Efectivo</h3>
+            <h3 style="margin:4px 0 0;font-size:1.1rem;">Registrar retiro rapido</h3>
           </div>
           <button id="_cajaDescuentoClose" style="background:none;border:none;color:#fff;font-size:1.6rem;cursor:pointer;line-height:1;padding:0;">×</button>
         </div>
         <div style="padding:24px;">
-          <p style="margin:0 0 16px;font-size:0.88rem;color:#6b7280;">El monto se descontará del efectivo esperado en pantalla. <strong>No se guarda en la base de datos.</strong></p>
-          <label style="font-size:0.8rem;font-weight:700;color:#374151;display:block;margin-bottom:6px;letter-spacing:.5px;">MONTO A DESCONTAR ($)</label>
+          <p style="margin:0 0 16px;font-size:0.88rem;color:#6b7280;">El retiro se guardara como corte de caja y aparecera en el historial.</p>
+          <label style="font-size:0.8rem;font-weight:700;color:#374151;display:block;margin-bottom:6px;letter-spacing:.5px;">MONTO A RETIRAR ($)</label>
           <input id="_cajaDescuentoInput" type="number" min="0" step="0.01" placeholder="0.00"
             style="width:100%;padding:12px 14px;font-size:1.4rem;font-weight:700;border:2px solid #a5b4fc;border-radius:8px;text-align:right;outline:none;box-sizing:border-box;">
           <div style="display:flex;gap:10px;margin-top:18px;justify-content:flex-end;">
@@ -5131,50 +5009,29 @@ function getThermalTicketPreviewStyle() {
       const btn = document.getElementById('_cajaDescuentoConfirmBtn');
       if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
 
-      // Buscar el último corte real (excluir cortes de tarjeta)
-      const { data: cuts } = await supabaseClient
-        .from('cash_registers')
-        .select('id, opening_amount, opened_at, closed_at, difference')
-        .eq('store_id', storeId)
-        .eq('is_closed', true)
-        .order('closed_at', { ascending: false })
-        .limit(10);
-
-      const isCardCut = (c) => {
-        if (!c.opened_at || !c.closed_at) return false;
-        return (new Date(c.closed_at) - new Date(c.opened_at)) < 1000
-          && parseFloat(c.opening_amount) === 0
-          && parseFloat(c.difference) === 0;
-      };
-      const lastReal = (cuts || []).find(c => !isCardCut(c));
-
-      if (!lastReal) {
-        showToast('No hay corte previo para ajustar. Haz un corte de caja primero.', 'warning');
-        if (btn) { btn.disabled = false; btn.textContent = 'Aplicar Descuento'; }
-        return;
-      }
-
-      // Usar el efectivo actual como base (no el opening del corte),
-      // y actualizar closed_at a ahora para que las ventas del turno
-      // queden "antes del corte" y no se sumen al nuevo efectivo.
       const currentEffective = parseMoneyValue(document.getElementById('cajaEfectivoTotal')?.value || 0);
-      const newOpening = Math.max(0, currentEffective - amount);
-
-      const { error } = await supabaseClient
-        .from('cash_registers')
-        .update({ opening_amount: newOpening, closed_at: new Date().toISOString() })
-        .eq('id', lastReal.id);
-
-      if (error) {
-        showToast('Error al guardar ajuste: ' + error.message, 'error');
+      if (amount > currentEffective) {
+        showToast('El retiro no puede ser mayor al efectivo esperado.', 'warning');
         if (btn) { btn.disabled = false; btn.textContent = 'Aplicar Descuento'; }
         return;
       }
 
-      showToast(`Ajuste de ${formatCurrencyMX(amount)} aplicado`, 'success');
-      close();
-      // Recargar todo desde la DB para que banner, historial y monto esperado queden consistentes
-      if (typeof window.loadCajaData === 'function') await window.loadCajaData();
+      try {
+        await registerCashCutAtomic({
+          expected: currentEffective,
+          withdraw: amount,
+          leave: currentEffective - amount,
+          expectedSince: typeof _cajaSinceDate !== 'undefined' ? _cajaSinceDate : null,
+          cutType: 'cash',
+          notes: 'Retiro rapido con Ctrl+Alt+D'
+        });
+        showToast(`Retiro de ${formatCurrencyMX(amount)} registrado y verificado`, 'success');
+        close();
+        if (typeof window.loadCajaData === 'function') await window.loadCajaData();
+      } catch (error) {
+        showToast('No se registro el retiro: ' + error.message, 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Registrar retiro'; }
+      }
     });
   });
 
@@ -5671,6 +5528,72 @@ let _cajaCurrentStoreId = null;
 let _cajaEfectivoTotal = 0;
 let _cajaTarjetaTotal = 0;
 let _cajaSinceDate = null; // sales since last cut
+let _cajaCardSinceDate = null;
+
+function createCashRequestId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
+    const random = Math.random() * 16 | 0;
+    return (char === 'x' ? random : (random & 0x3 | 0x8)).toString(16);
+  });
+}
+
+async function registerCashCutAtomic({
+  expected,
+  withdraw,
+  leave,
+  expectedSince,
+  cutType = 'cash',
+  notes = null
+}) {
+  const currentEmployee = Auth.getCurrentUser();
+  if (!currentEmployee?.id && cutType === 'cash') {
+    throw new Error('Sesion invalida. Cierra sesion y vuelve a entrar antes de registrar el corte.');
+  }
+
+  const { data, error } = await supabaseClient.rpc('register_cash_cut_v2', {
+    p_store_id: _cajaCurrentStoreId,
+    p_employee_id: currentEmployee?.id || null,
+    p_expected_amount: expected,
+    p_withdrawal_amount: withdraw,
+    p_leave_amount: leave,
+    p_expected_since: expectedSince || null,
+    p_request_id: createCashRequestId(),
+    p_cut_type: cutType,
+    p_notes: notes
+  });
+
+  if (error) throw error;
+  if (!data || !['ok', 'conflict'].includes(data.status)) {
+    throw new Error('La base no devolvio una confirmacion valida del corte');
+  }
+
+  if (data.status === 'conflict') {
+    await loadCajaData();
+    const reason = data.reason === 'expected_amount_changed'
+      ? `El efectivo esperado cambio a ${formatCurrencyMX(data.expectedAmount)} por una venta o movimiento nuevo.`
+      : 'Otra terminal registro un corte antes que esta.';
+    throw new Error(`${reason} Los datos se actualizaron; revisa los montos y vuelve a confirmar.`);
+  }
+
+  const { data: verified, error: verifyError } = await supabaseClient
+    .from('cash_registers')
+    .select('id, withdrawal_amount, opening_amount, closing_amount, expected_amount, difference, closed_at, cut_type, request_id')
+    .eq('id', data.id)
+    .single();
+
+  if (verifyError || !verified) {
+    throw new Error('El corte fue creado, pero no se pudo verificar. No lo repitas; usa Refrescar y revisa el historial.');
+  }
+
+  const matches = Math.abs(parseFloat(verified.withdrawal_amount || 0) - Number(withdraw || 0)) < 0.01
+    && Math.abs(parseFloat(verified.opening_amount || 0) - Number(leave || 0)) < 0.01;
+  if (!matches) {
+    throw new Error('El corte fue creado, pero la verificacion de montos no coincidio. No lo repitas y revisa el historial.');
+  }
+
+  return { ...data, verified };
+}
 
 async function loadCorteCaja() {
   const sel = document.getElementById('cajaStoreSelect');
@@ -5726,6 +5649,8 @@ window.loadCajaData = async function () {
   // CRITICAL FIX: To prevent misidentifying a cash cut where the user withdrew 100% of cash as a card cut,
   // we check if the cut was opened AND closed in the exact same moment (time difference < 1 second).
   const isCardCut = (cut) => {
+    if (cut.cut_type === 'bank' || cut.cut_type === 'transfer') return true;
+    if (cut.cut_type === 'cash' || cut.cut_type === 'correction') return false;
     if (!cut.opened_at || !cut.closed_at) return false;
     const oTime = new Date(cut.opened_at).getTime();
     const cTime = new Date(cut.closed_at).getTime();
@@ -5737,6 +5662,7 @@ window.loadCajaData = async function () {
 
   _cajaSinceDate = lastCashCut?.closed_at || null;
   const cardSinceDate = lastCardCut?.closed_at || null;
+  _cajaCardSinceDate = cardSinceDate;
 
   // Show last CASH cut info in the banner
   const lastCutEl = document.getElementById('cajaLastCut');
@@ -5850,9 +5776,12 @@ window.loadCajaData = async function () {
       const closing = parseFloat(h.closing_amount || 0);
       const leaving = parseFloat(h.opening_amount || 0);
       const isBankCut = isCardCut(h);
-      const retiroEfectivo = isBankCut ? 0 : Math.max(0, closing - leaving);
+      const recordedWithdrawal = h.withdrawal_amount == null ? null : parseFloat(h.withdrawal_amount);
+      const retiroEfectivo = isBankCut
+        ? (recordedWithdrawal ?? closing)
+        : (recordedWithdrawal ?? Math.max(0, closing - leaving));
       const amountLabel = isBankCut ? 'Tarj/Transf.:' : 'Retiro efectivo:';
-      const amount = isBankCut ? closing : retiroEfectivo;
+      const amount = retiroEfectivo;
       const diff = parseFloat(h.difference || 0);
       const diffText = isBankCut && Math.abs(diff) >= 0.01
         ? ` <span style="color:${diff < 0 ? '#dc2626' : '#16a34a'}; font-size:0.72rem;">Dif. ${diff >= 0 ? '+' : ''}${formatCurrencyMX(diff)}</span>`
@@ -5931,29 +5860,6 @@ window.updateCajaDiff = function (source) {
 
 window.vaciarTarjeta = async function () {
   if (!_cajaCurrentStoreId) return;
-  if (!confirm(`¿Marcar $${_cajaTarjetaTotal.toFixed(2)} en tarjeta como cobrados/retirados? Esto registrará un corte parcial de tarjeta.`)) return;
-
-  // Insert a partial register record for card clearing
-  const { error } = await supabaseClient.from('cash_registers').insert({
-    store_id: _cajaCurrentStoreId,
-    opening_amount: 0,
-    closing_amount: _cajaTarjetaTotal,
-    expected_amount: _cajaTarjetaTotal,
-    difference: 0,
-    is_closed: true,
-    opened_at: new Date().toISOString(),
-    closed_at: new Date().toISOString()
-  });
-
-  if (error) { showToast('Error al registrar: ' + error.message, 'error'); return; }
-
-  showToast(`✅ Tarjeta vaciada — $${_cajaTarjetaTotal.toFixed(2)} marcados como cobrados`, 'success');
-  document.getElementById('cajaTarjetaTotal').textContent = '$0.00';
-  _cajaTarjetaTotal = 0;
-};
-
-window.vaciarTarjeta = async function () {
-  if (!_cajaCurrentStoreId) return;
   const amountInput = document.getElementById('cajaTarjetaRetiroAmount');
   const amountToClear = parseMoneyValue(amountInput?.value || _cajaTarjetaTotal);
   const expectedTotal = _cajaTarjetaTotal;
@@ -5980,18 +5886,19 @@ window.vaciarTarjeta = async function () {
 
   if (!confirm(`Marcar ${formatCurrencyMX(amountToClear)} como cobrado/retirado de tarjeta/transferencia?\n\nPendiente en sistema: ${formatCurrencyMX(expectedTotal)}${diffLine}\n\nEsto registrara un corte parcial bancario.`)) return;
 
-  const { error } = await supabaseClient.from('cash_registers').insert({
-    store_id: _cajaCurrentStoreId,
-    opening_amount: 0,
-    closing_amount: amountToClear,
-    expected_amount: expectedTotal,
-    difference,
-    is_closed: true,
-    opened_at: new Date().toISOString(),
-    closed_at: new Date().toISOString()
-  });
-
-  if (error) { showToast('Error al registrar: ' + error.message, 'error'); return; }
+  try {
+    await registerCashCutAtomic({
+      expected: expectedTotal,
+      withdraw: amountToClear,
+      leave: 0,
+      expectedSince: _cajaCardSinceDate,
+      cutType: 'bank',
+      notes: 'Cobro de tarjeta y transferencia'
+    });
+  } catch (error) {
+    showToast('No se registro el cobro: ' + error.message, 'error');
+    return;
+  }
 
   showToast(`Tarjeta/transferencia marcada - ${formatCurrencyMX(amountToClear)} cobrados`, 'success');
   document.getElementById('cajaTarjetaTotal').textContent = formatCurrencyMX(0);
@@ -6014,18 +5921,19 @@ window.vaciarTransferencia = async function () {
   if (!confirm(`¿Marcar $${currentTotal.toFixed(2)} en transferencias como cobrados? Esto registrará un corte parcial de transferencia.`)) return;
 
   // Registrar como corte parcial de transferencia
-  const { error } = await supabaseClient.from('cash_registers').insert({
-    store_id: _cajaCurrentStoreId,
-    opening_amount: 0,
-    closing_amount: currentTotal,
-    expected_amount: currentTotal,
-    difference: 0,
-    is_closed: true,
-    opened_at: new Date().toISOString(),
-    closed_at: new Date().toISOString()
-  });
-
-  if (error) { showToast('Error al registrar: ' + error.message, 'error'); return; }
+  try {
+    await registerCashCutAtomic({
+      expected: currentTotal,
+      withdraw: currentTotal,
+      leave: 0,
+      expectedSince: _cajaCardSinceDate,
+      cutType: 'transfer',
+      notes: 'Cobro de transferencias'
+    });
+  } catch (error) {
+    showToast('No se registro la transferencia: ' + error.message, 'error');
+    return;
+  }
 
   showToast(`✅ Transferencia vaciada — $${currentTotal.toFixed(2)} marcados como cobrados`, 'success');
   if (transEl) transEl.textContent = '$0.00';
@@ -6052,28 +5960,20 @@ window.registrarCorte = async function () {
   const confirmMsg = `Confirmar corte:\n\n💵 En Caja (Calc): $${closing.toFixed(2)}\n📊 Esperado:    $${expected.toFixed(2)}\n❕ Diferencia:  $${difference.toFixed(2)}\n\n- Se retira:   $${withdraw.toFixed(2)}\n- Se deja:     $${leave.toFixed(2)}\n\n¿Registrar corte?`;
   if (false && !confirm(confirmMsg)) return;
 
-  const currentUser = Auth.getCurrentUser();
-  if (!currentUser?.id) {
-    showToast('Sesion invalida. Cierra sesion y vuelve a entrar antes de registrar el corte.', 'error');
+  try {
+    await registerCashCutAtomic({
+      expected,
+      withdraw,
+      leave,
+      expectedSince: _cajaSinceDate,
+      cutType: 'cash'
+    });
+  } catch (error) {
+    showToast('No se registro el corte: ' + error.message, 'error');
     return;
   }
-  const employeeId = currentUser?.id || null;
 
-  const { error } = await supabaseClient.from('cash_registers').insert({
-    store_id: _cajaCurrentStoreId,
-    employee_id: employeeId,
-    opening_amount: leave,         // money left in register = next shift's opening
-    closing_amount: closing,       // actual counted
-    expected_amount: expected,      // what should be there from efectivo sales
-    difference: difference,
-    is_closed: true,
-    opened_at: _cajaSinceDate || new Date().toISOString(),
-    closed_at: new Date().toISOString()
-  });
-
-  if (error) { showToast('Error al registrar corte: ' + error.message, 'error'); return; }
-
-  showToast(`Corte registrado - Retiro: ${formatCurrencyMX(closing - leave)} | Queda en caja: ${formatCurrencyMX(leave)}`, 'success');
+  showToast(`Corte registrado y verificado - Retiro: ${formatCurrencyMX(withdraw)} | Queda en caja: ${formatCurrencyMX(leave)}`, 'success');
 
   // Reset inputs and refresh
   document.getElementById('cajaClosingAmount').value = '';
@@ -6304,6 +6204,13 @@ window.reprintRecentTicket = async function (ticketId) {
   printTicket(cloneTicketData(ticket), true);
 };
 
+function formatLetterQuantity(value) {
+  return Number(value || 0).toLocaleString('es-MX', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3
+  });
+}
+
 function buildLetterTicketDocument(saleData) {
   const cfg = resolveTicketConfig();
   const cart = saleData?.items || [];
@@ -6332,7 +6239,7 @@ function buildLetterTicketDocument(saleData) {
   const itemRows = cart.map((item, index) => {
     const quantity = Number(item.quantity || 0);
     const unitPrice = Number(item.price || 0);
-    return `<tr><td>${index + 1}</td><td>${escapeHtml(item.name || 'Producto')}</td><td class="numeric">${quantity}</td><td class="numeric">$${unitPrice.toFixed(2)}</td><td class="numeric">$${(quantity * unitPrice).toFixed(2)}</td></tr>`;
+    return `<tr><td>${formatLetterQuantity(index + 1)}</td><td>${escapeHtml(item.name || 'Producto')}</td><td class="numeric">${formatLetterQuantity(quantity)}</td><td class="numeric">${formatCurrencyMX(unitPrice)}</td><td class="numeric">${formatCurrencyMX(quantity * unitPrice)}</td></tr>`;
   }).join('');
 
   const body = `
@@ -6346,8 +6253,8 @@ function buildLetterTicketDocument(saleData) {
       </section>
       <section><h2>Detalle de productos</h2><table class="letter-table"><thead><tr><th>#</th><th>Producto</th><th class="numeric">Cantidad</th><th class="numeric">P. unitario</th><th class="numeric">Importe</th></tr></thead><tbody>${itemRows}</tbody></table></section>
       <section class="letter-summary">
-        <div class="letter-payment"><span>Metodo de pago</span><strong>${escapeHtml(paymentLabel)}</strong><small>${totalItems} pieza(s)</small></div>
-        <table><tbody><tr><td>Subtotal</td><td>$${subtotal.toFixed(2)}</td></tr>${discountAmount > 0 ? `<tr class="discount"><td>Descuento</td><td>-$${discountAmount.toFixed(2)}</td></tr>` : ''}<tr class="grand-total"><td>Total</td><td>$${total.toFixed(2)}</td></tr></tbody></table>
+        <div class="letter-payment"><span>Metodo de pago</span><strong>${escapeHtml(paymentLabel)}</strong><small>${formatLetterQuantity(totalItems)} pieza(s)</small></div>
+        <table><tbody><tr><td>Subtotal</td><td>${formatCurrencyMX(subtotal)}</td></tr>${discountAmount > 0 ? `<tr class="discount"><td>Descuento</td><td>-${formatCurrencyMX(discountAmount)}</td></tr>` : ''}<tr class="grand-total"><td>Total</td><td>${formatCurrencyMX(total)}</td></tr></tbody></table>
       </section>
       <footer>${escapeHtml(cfg.footerLine1 || 'Gracias por su compra.')}${cfg.footerLine2 ? `<br><strong>${escapeHtml(cfg.footerLine2)}</strong>` : ''}${cfg.footerLine3 ? `<br>${escapeHtml(cfg.footerLine3)}` : ''}</footer>
     </main>`;
@@ -8885,9 +8792,9 @@ async function processSale() {
       return;
     }
 
-    if (!isMissingRpcError(rpcSaleError)) {
-      throw rpcSaleError;
-    }
+    throw rpcSaleError || new Error(
+      'La venta no recibio confirmacion atomica de la base de datos. No se registro ningun movimiento.'
+    );
 
     // 1. Validate stock before creating sale rows.
     for (const item of currentCart) {
@@ -9044,7 +8951,10 @@ async function processSale() {
 window.posCharts = window.posCharts || {};
 
 const APP_LOCALE = 'es-MX';
-const APP_TIME_ZONE = 'America/Mexico_City';
+// Electron 22 incluye ICU 71 y aplica la regla antigua de horario de verano a
+// America/Mexico_City. Desde octubre de 2022 la zona centro de Mexico usa UTC-6
+// todo el año; la zona fija evita que el sistema adelante una hora en verano.
+const APP_TIME_ZONE = 'Etc/GMT+6';
 
 function getTimeZoneOffsetMs(date, timeZone = APP_TIME_ZONE) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -9062,7 +8972,7 @@ function getTimeZoneOffsetMs(date, timeZone = APP_TIME_ZONE) {
   }, {});
 
   const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
-  return asUtc - date.getTime();
+  return asUtc - Math.floor(date.getTime() / 1000) * 1000;
 }
 
 function getUtcDateForAppTimeZone(year, month, day, hour = 0, minute = 0, second = 0, millisecond = 0) {
