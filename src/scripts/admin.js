@@ -5529,6 +5529,11 @@ let _cajaEfectivoTotal = 0;
 let _cajaTarjetaTotal = 0;
 let _cajaSinceDate = null; // sales since last cut
 let _cajaCardSinceDate = null;
+// True when "Dinero a dejar en caja" was typed directly by the user (a deliberate
+// adjustment), as opposed to being auto-calculated from "Dinero a retirar" or the
+// sync button. In that case the resulting diff is still computed and saved to the
+// DB for audit purposes, but it should not surface as a "discrepancy" in the UI.
+let _cajaLeaveManualEdit = false;
 
 function createCashRequestId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
@@ -5815,24 +5820,31 @@ window.updateCajaDiff = function (source) {
   if (source === 'withdraw') {
     const calculatedLeave = expected - withdraw;
     leaveInput.value = formatCurrencyMX(calculatedLeave);
+    _cajaLeaveManualEdit = false;
   }
   // If user is typing in Leave (Right), update Withdraw (Left)
   else if (source === 'leave') {
     // Standard asymmetric behavior: Do NOT update Withdraw automatically to allow diffs
-    // But if we wanted to enforce equality, we'd do it here. 
+    // But if we wanted to enforce equality, we'd do it here.
     // User requested: "Manual modification" allowed, so we do nothing here for auto-calc
     // EXCEPT if we want to confirm the diff calculation is running.
+    // This is a deliberate direct edit, not a discrepancy — mute the diff display for it.
+    _cajaLeaveManualEdit = true;
   }
   // If user clicks Refresh Button (source = 'leave_refresh')
   else if (source === 'leave_refresh') {
-    // "Update everything": This means the user is asserting that their physical count (Leave + Withdraw) 
+    // "Update everything": This means the user is asserting that their physical count (Leave + Withdraw)
     // IS the correct reality, and they want the system to accept it.
     // So we update Expected to match (Leave + Withdraw). Diff becomes 0.
     const currentLeave = parseMoneyValue(leaveInput.value);
     const newExpected = withdraw + currentLeave;
     expectedInput.value = formatCurrencyMX(newExpected);
-    // Also likely want to ensure Withdraw is correct? 
+    // Also likely want to ensure Withdraw is correct?
     // If they typed 150 in Leave, and Withdraw is 0. Expected becomes 150.
+    _cajaLeaveManualEdit = false;
+  }
+  else {
+    _cajaLeaveManualEdit = false;
   }
 
   // Reread leave because it might have been updated above or manually edited
@@ -5847,9 +5859,18 @@ window.updateCajaDiff = function (source) {
   // Update Summary UI
   document.getElementById('cajaExpected').textContent = formatCurrencyMX(expected);
 
-  // "Diferencia"
-  document.getElementById('cajaDiff').textContent = `${diff >= 0 ? '+' : ''}${formatCurrencyMX(Math.abs(diff))}`;
-  document.getElementById('cajaDiff').style.color = Math.abs(diff) < 0.01 ? '#6b7280' : (diff < 0 ? '#ef4444' : '#16a34a');
+  // "Diferencia" — hidden when it's a deliberate direct edit to "dejar en caja"
+  // (still computed above and still sent to registerCashCutAtomic/DB for audit trail)
+  const cajaDiffEl = document.getElementById('cajaDiff');
+  if (_cajaLeaveManualEdit) {
+    cajaDiffEl.textContent = '—';
+    cajaDiffEl.style.color = '#9ca3af';
+    cajaDiffEl.title = 'Ajuste directo, no se considera discrepancia';
+  } else {
+    cajaDiffEl.textContent = `${diff >= 0 ? '+' : ''}${formatCurrencyMX(Math.abs(diff))}`;
+    cajaDiffEl.style.color = Math.abs(diff) < 0.01 ? '#6b7280' : (diff < 0 ? '#ef4444' : '#16a34a');
+    cajaDiffEl.title = '';
+  }
 
   // "A Retirar" (Visualization only, redundancy with input but good for summary)
   // In this logic, A Retirar IS the withdraw input.
@@ -5954,7 +5975,13 @@ window.registrarCorte = async function () {
   // Calculated actual money counted
   const closing = withdraw + leave;
   const difference = closing - expected;
-  const formattedConfirmMsg = `Confirmar corte:\n\nEn caja contado: ${formatCurrencyMX(closing)}\nEsperado: ${formatCurrencyMX(expected)}\nDiferencia: ${difference >= 0 ? '+' : ''}${formatCurrencyMX(difference)}\n\nSe retira: ${formatCurrencyMX(withdraw)}\nSe deja: ${formatCurrencyMX(leave)}\n\nRegistrar corte?`;
+  // If the diff only exists because the user typed directly into "dejar en caja",
+  // treat it as a deliberate adjustment and don't surface it as a discrepancy here.
+  // The true difference is still sent to registerCashCutAtomic and stored in the DB.
+  const diffLine = _cajaLeaveManualEdit
+    ? ''
+    : `Diferencia: ${difference >= 0 ? '+' : ''}${formatCurrencyMX(difference)}\n\n`;
+  const formattedConfirmMsg = `Confirmar corte:\n\nEn caja contado: ${formatCurrencyMX(closing)}\nEsperado: ${formatCurrencyMX(expected)}\n${diffLine}Se retira: ${formatCurrencyMX(withdraw)}\nSe deja: ${formatCurrencyMX(leave)}\n\nRegistrar corte?`;
   if (!confirm(formattedConfirmMsg)) return;
 
   const confirmMsg = `Confirmar corte:\n\n💵 En Caja (Calc): $${closing.toFixed(2)}\n📊 Esperado:    $${expected.toFixed(2)}\n❕ Diferencia:  $${difference.toFixed(2)}\n\n- Se retira:   $${withdraw.toFixed(2)}\n- Se deja:     $${leave.toFixed(2)}\n\n¿Registrar corte?`;
@@ -5978,6 +6005,7 @@ window.registrarCorte = async function () {
   // Reset inputs and refresh
   document.getElementById('cajaClosingAmount').value = '';
   document.getElementById('cajaLeaveAmount').value = '';
+  _cajaLeaveManualEdit = false;
   await loadCajaData();
 };
 
