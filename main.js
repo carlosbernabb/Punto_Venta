@@ -568,20 +568,32 @@ function getInventoryCountPage(session) {
           '<div class="controls">' +
             '<div><label>Cantidad</label><input type="number" min="0" step="0.001" class="qty" value="' + Number(p.quantity || 0) + '"></div>' +
             '<div><label>Minimo</label><input type="number" min="0" step="1" class="min" value="' + Number(p.min_stock || 0) + '"></div>' +
-            '<button type="button" onclick="saveItem(\\'' + p.id + '\\')">Guardar</button>' +
+            '<button type="button" class="save">Guardar</button>' +
           '</div>' +
           '<div class="status"></div>' +
         '</section>';
       }).join('');
 
-      list.querySelectorAll('.qty, .min').forEach(input => {
-        input.addEventListener('input', () => {
-          const productId = input.closest('[data-id]')?.dataset.id;
-          if (productId) dirtyProductIds.add(productId);
-        });
-        input.addEventListener('blur', () => {
-          if (!list.querySelector('input[type=number]:focus')) render();
-        });
+      list.querySelectorAll('.item').forEach(row => {
+        const productId = row.dataset.id;
+        const quantityInput = row.querySelector('.qty');
+        const minStockInput = row.querySelector('.min');
+        const saveButton = row.querySelector('.save');
+
+        const preserveDraft = () => {
+          const product = products.find(item => item.id === productId);
+          if (!product) return;
+
+          const draftQuantity = parseFloat(quantityInput.value);
+          const draftMinStock = parseInt(minStockInput.value, 10);
+          if (!Number.isNaN(draftQuantity)) product.quantity = draftQuantity;
+          if (!Number.isNaN(draftMinStock)) product.min_stock = draftMinStock;
+          dirtyProductIds.add(productId);
+        };
+
+        quantityInput.addEventListener('input', preserveDraft);
+        minStockInput.addEventListener('input', preserveDraft);
+        saveButton.addEventListener('click', () => saveItem(productId));
       });
     }
 

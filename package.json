@@ -1,6 +1,6 @@
 {
   "name": "punto-venta-naturista",
-  "version": "9.0.3",
+  "version": "9.0.4",
   "description": "Sistema de Punto de Venta para Tiendas Naturistas",
   "main": "main.js",
   "scripts": {
