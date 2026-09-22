@@ -746,7 +746,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       'stock-general': { title: 'Stock General', subtitle: 'Consulta total y distribucion por tienda' },
       transfers: { title: 'Transferencias de Inventario', subtitle: 'Movimientos internos entre tiendas y bodega' },
       sales: { title: 'Punto de Venta', subtitle: 'Caja Registradora' },
-      tickets: { title: 'Tickets', subtitle: 'Reimpresion de los ultimos tickets de esta sesion' },
+      tickets: { title: 'Tickets', subtitle: 'Tickets de los últimos 14 días de esta tienda' },
       caja: { title: 'Corte de Caja', subtitle: 'Cierre y retiro de efectivo por tienda' },
       reports: { title: 'Reportes y Análisis', subtitle: 'Estadísticas del negocio' },
       'brand-profit': { title: 'Ganancias por Marca', subtitle: 'Porcentaje de ganancia sobre precio de compra' },
@@ -6020,6 +6020,15 @@ const recentTicketCache = [];
 let ticketHistoryLoadedForStore = null;
 let ticketHistoryLoading = false;
 let ticketHistoryRefreshTimer = null;
+const TICKET_HISTORY_DAYS = 14; // cuántos días de tickets se conservan visibles por tienda
+const ticketDayExpandedOverrides = new Map(); // dayKey -> abierto/cerrado elegido por el usuario
+
+window.toggleTicketDay = function (dayKey) {
+  const todayKey = toLocalDateInputValue(new Date());
+  const isOpen = ticketDayExpandedOverrides.has(dayKey) ? ticketDayExpandedOverrides.get(dayKey) : dayKey === todayKey;
+  ticketDayExpandedOverrides.set(dayKey, !isOpen);
+  renderTicketsList();
+};
 
 function cloneTicketData(ticket) {
   return JSON.parse(JSON.stringify(ticket));
@@ -6039,9 +6048,10 @@ function getTicketHistoryStore() {
 }
 
 function getTicketHistoryStartIso() {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  return start.toISOString();
+  const todayKey = toLocalDateInputValue(new Date());
+  const startKey = shiftLocalDateInputValue(todayKey, -(TICKET_HISTORY_DAYS - 1));
+  const [year, month, day] = startKey.split('-').map(Number);
+  return getUtcDateForAppTimeZone(year, month, day, 0, 0, 0, 0).toISOString();
 }
 
 function getSharedTicketSnapshot(sale, fallbackStoreName = '') {
@@ -6084,16 +6094,17 @@ async function loadSharedTickets(force = false) {
 
   ticketHistoryLoading = true;
   try {
-    const { data: sales, error } = await supabaseClient
-      .from('sales')
-      .select('id, store_id, total, payment_method, cash_amount, card_amount, transfer_amount, mixed_method, sale_date, sale_type, store:stores(name), employee:employees(full_name, username), customer:customers(name, customer_code), items:sale_items(product_id, quantity, unit_price, subtotal, product:products(name))')
-      .eq('store_id', store.id)
-      .gte('sale_date', getTicketHistoryStartIso())
-      .order('sale_date', { ascending: false })
-      .limit(300);
+    const endIso = getLocalDateRange(toLocalDateInputValue(new Date())).endIso;
+    const sales = await fetchSalesForDateRange(
+      'id, store_id, total, payment_method, cash_amount, card_amount, transfer_amount, mixed_method, sale_date, sale_type, store:stores(name), employee:employees(full_name, username), customer:customers(name, customer_code), items:sale_items(product_id, quantity, unit_price, subtotal, product:products(name))',
+      getTicketHistoryStartIso(),
+      endIso,
+      { storeId: store.id, ascending: false }
+    );
 
-    if (error) throw error;
-    recentTicketCache.splice(0, recentTicketCache.length, ...(sales || []).map(sale => getSharedTicketSnapshot(sale, store.name)));
+    const seen = new Set();
+    const uniqueSales = sales.filter(sale => !seen.has(sale.id) && seen.add(sale.id));
+    recentTicketCache.splice(0, recentTicketCache.length, ...uniqueSales.map(sale => getSharedTicketSnapshot(sale, store.name)));
     ticketHistoryLoadedForStore = store.id;
   } catch (error) {
     console.error('Error cargando tickets compartidos:', error);
@@ -6109,7 +6120,7 @@ function startSharedTicketRefresh() {
     if (document.getElementById('section-tickets')?.classList.contains('active')) {
       loadTickets(true);
     }
-  }, 15000);
+  }, 30000);
 }
 
 function rememberRecentTicket(ticket) {
@@ -6133,49 +6144,77 @@ function getTicketTotal(ticket) {
   return Math.max(0, subtotal - discountAmount);
 }
 
+function getTicketDayLabel(date, todayKey, yesterdayKey) {
+  const dayKey = toLocalDateInputValue(date);
+  if (dayKey === todayKey) return 'Hoy';
+  if (dayKey === yesterdayKey) return 'Ayer';
+  const label = formatAppDateTime(date, { weekday: 'long', day: 'numeric', month: 'long' });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 function renderTicketsList() {
   const list = document.getElementById('ticketsList');
   if (!list) return;
 
   if (recentTicketCache.length === 0) {
     list.innerHTML = `
-      <div style="text-align:center; padding:2rem; color:#64748b;">
-        No hay tickets registrados hoy en esta tienda.
+      <div class="ticket-empty">
+        No hay tickets registrados en los últimos ${TICKET_HISTORY_DAYS} días en esta tienda.
       </div>`;
     return;
   }
 
-  list.innerHTML = recentTicketCache.map((ticket, index) => {
-    const customerName = ticket.customer?.name || 'Sin cliente';
-    const itemCount = (ticket.items || []).reduce((sum, item) => sum + parseInt(item.quantity || 0), 0);
+  const todayKey = toLocalDateInputValue(new Date());
+  const yesterdayKey = shiftLocalDateInputValue(todayKey, -1);
+  const days = [];
+  recentTicketCache.forEach(ticket => {
+    const date = ticket.date || Date.now();
+    const key = toLocalDateInputValue(date);
+    let day = days[days.length - 1];
+    if (!day || day.key !== key) {
+      day = { key, label: getTicketDayLabel(date, todayKey, yesterdayKey), tickets: [], total: 0 };
+      days.push(day);
+    }
     const total = getTicketTotal(ticket);
-    const timeText = formatAppDateTime(ticket.date || Date.now(), {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    day.tickets.push({ ticket, total });
+    day.total += total;
+  });
 
+  list.innerHTML = days.map(day => {
+    const isOpen = ticketDayExpandedOverrides.has(day.key) ? ticketDayExpandedOverrides.get(day.key) : day.key === todayKey;
     return `
-      <div onclick="previewRecentTicket('${ticket.id}')" title="Ver vista previa del ticket"
-           style="display:grid; grid-template-columns:52px 1fr auto; gap:14px; align-items:center; padding:14px 12px; border-bottom:1px solid #e5e7eb; cursor:pointer;">
-        <div style="width:42px; height:42px; display:grid; place-items:center; border-radius:8px; background:#edf7ed; color:#1e4d0f; font-weight:800;">
-          #${index + 1}
-        </div>
-        <div style="min-width:0;">
-          <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
-            <strong style="font-size:1rem; color:#111;">${escapeHtml(ticket.folio || 'SIN FOLIO')}</strong>
-            <span class="badge badge-success" style="background:#e6f4ea; color:#1e7e34;">${escapeHtml(ticket.storeName || 'Tienda')}</span>
-          </div>
-          <div style="margin-top:4px; color:#64748b; font-size:0.86rem;">
-            ${escapeHtml(timeText)} · ${escapeHtml(customerName)} · ${itemCount} pieza(s) · ${formatCurrencyMX(total)}
-          </div>
-        </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <button class="btn btn-sm btn-primary" title="Imprimir ticket en la impresora configurada" onclick="event.stopPropagation(); reprintRecentTicket('${ticket.id}')">Ticket</button>
-          <button class="btn btn-sm btn-secondary" title="Ver version formal para hoja carta" onclick="event.stopPropagation(); previewLetterTicket('${ticket.id}')">Carta</button>
-        </div>
-      </div>`;
+    <div class="ticket-day${isOpen ? ' is-open' : ''}">
+      <button type="button" class="ticket-day-header" aria-expanded="${isOpen}" onclick="toggleTicketDay('${day.key}')"
+              title="${isOpen ? 'Contraer' : 'Ver'} tickets de este día">
+        <span class="ticket-day-label">
+          <svg class="ticket-day-chevron" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M7 5l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          ${escapeHtml(day.label)}
+        </span>
+        <span class="ticket-day-summary">${day.tickets.length} ticket(s) · ${formatCurrencyMX(day.total)}</span>
+      </button>
+      ${!isOpen ? '' : day.tickets.map(({ ticket, total }, index) => {
+        const customerName = ticket.customer?.name || 'Sin cliente';
+        const itemCount = (ticket.items || []).reduce((sum, item) => sum + parseInt(item.quantity || 0), 0);
+        const timeText = formatAppDateTime(ticket.date || Date.now(), { hour: '2-digit', minute: '2-digit' });
+        return `
+          <div class="ticket-row" onclick="previewRecentTicket('${ticket.id}')" title="Ver vista previa del ticket">
+            <div class="ticket-num">#${day.tickets.length - index}</div>
+            <div style="min-width:0;">
+              <div class="ticket-title">
+                <strong class="ticket-folio">${escapeHtml(ticket.folio || 'SIN FOLIO')}</strong>
+                <span class="badge badge-success">${escapeHtml(ticket.storeName || 'Tienda')}</span>
+              </div>
+              <div class="ticket-meta">
+                ${escapeHtml(timeText)} · ${escapeHtml(customerName)} · ${itemCount} pieza(s) · <strong>${formatCurrencyMX(total)}</strong>
+              </div>
+            </div>
+            <div class="ticket-actions">
+              <button class="btn btn-sm btn-primary" title="Ver vista previa del ticket antes de imprimir" onclick="event.stopPropagation(); previewRecentTicket('${ticket.id}')">Ticket</button>
+              <button class="btn btn-sm btn-secondary" title="Ver version formal para hoja carta" onclick="event.stopPropagation(); previewLetterTicket('${ticket.id}')">Carta</button>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>`;
   }).join('');
 }
 
@@ -6219,17 +6258,6 @@ window.previewRecentTicket = async function (ticketId) {
     return;
   }
   printTicket(cloneTicketData(ticket), false, true);
-};
-
-window.reprintRecentTicket = async function (ticketId) {
-  await loadSharedTickets();
-  const ticket = recentTicketCache.find(item => item.id === ticketId);
-  if (!ticket) {
-    showToast('Ese ticket ya no está disponible en el historial de esta tienda', 'warning');
-    renderTicketsList();
-    return;
-  }
-  printTicket(cloneTicketData(ticket), true);
 };
 
 function formatLetterQuantity(value) {
@@ -9113,12 +9141,15 @@ async function fetchSalesForDateRange(selectFields, startIso, endIso, options = 
 
   for (let from = 0; from < maxRows; from += pageSize) {
     const to = Math.min(from + pageSize - 1, maxRows - 1);
-    const { data, error } = await supabaseClient
+    let query = supabaseClient
       .from('sales')
       .select(selectFields)
       .gte('sale_date', startIso)
-      .lt('sale_date', endIso)
+      .lt('sale_date', endIso);
+    if (options.storeId) query = query.eq('store_id', options.storeId);
+    const { data, error } = await query
       .order('sale_date', { ascending: !!options.ascending })
+      .order('id', { ascending: true })
       .range(from, to);
 
     if (error) throw error;
